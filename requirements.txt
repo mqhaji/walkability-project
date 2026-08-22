@@ -1,0 +1,20 @@
+# Notebook runtime
+ipykernel==7.3.0
+
+# Data analysis
+numpy==2.5.1
+pandas==3.0.5
+
+# Geospatial analysis
+geopandas==1.1.4
+
+# Visualization
+matplotlib==3.11.1
+seaborn==0.13.2
+
+# HTTP/API access
+requests==2.34.2
+
+# Statistical and machine-learning models
+scikit-learn==1.9.0
+statsmodels==0.14.6
