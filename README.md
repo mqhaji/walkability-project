@@ -4,7 +4,7 @@ A ZIP/ZCTA-level comparison of whether the apparent relationship between commute
 
 > **Project status:** This repository preserves the current validated version of an inherited exploratory analysis. Data definitions and the research framing were refined during a technical audit and after preliminary results had been examined. The findings are therefore descriptive and diagnostic rather than a preregistered confirmatory test.
 
-> **Pipeline upgrade — Stage 1:** A small Python package and PostgreSQL source-table loader are now provided alongside the unchanged reference notebook. SQL analytical views, notebook migration, pytest/CI, and Power BI are later stages; the current statistical results were not produced from PostgreSQL.
+> **Pipeline upgrade:** Python extraction/loading, PostgreSQL analytical views, and the separate [PostgreSQL-backed analysis notebook](notebooks/walkability_analysis_postgres.ipynb) are implemented and locally verified. The original notebook is preserved as a reference. Automated pytest/CI and Power BI remain future work.
 
 ## Research Objective
 
@@ -150,7 +150,7 @@ python -m pip install -e .
 
 ## Stage 1: Load the PostgreSQL Source Tables
 
-The new pipeline currently stops at **Python extraction/validation → PostgreSQL**.
+The pipeline now runs **Python extraction/validation → PostgreSQL source tables → SQL analytical views**.
 The reference notebook still runs independently and is intentionally unchanged.
 Geometry stays in GeoPandas; PostgreSQL stores no polygons and needs no PostGIS.
 
@@ -215,7 +215,7 @@ inputs without PostgreSQL or any file writes, add `--validate-only` to either co
 | `fact_acs` | `(zcta, acs_year)` | Demographic, housing, and commuting estimates; pinned load year `2022` |
 
 - ZCTA keys stay five-digit text. Foreign keys prevent orphan facts.
-- Percentages stay in their original **0–100** units; later SQL views will derive shares and features.
+- Source percentages stay in their original **0–100** units; SQL views derive shares and features.
 - Floating-point estimates retain the notebook's precision, without extra currency rounding.
 - Unavailable ACS amounts/counts remain `NULL`, never zero. Invalid available values fail validation.
 - The reference inputs should load **250 rows per table**: NYC 172, Chicago 56, DC 22.
@@ -239,9 +239,69 @@ database. The two unavailable home values remain SQL `NULL`.
 The existing Python environment was restored on Python 3.13.15; dependency and
 scientific-library import checks pass. The reference notebook remains unchanged.
 These are local verification checks, **not yet a committed pytest suite or CI**.
-SQL analytical views and notebook migration remain Stage 2.
+### Stage 2: SQL analytics integration
+
+`sql/views.sql` defines two ordinary views:
+
+- `vw_analysis_features`: pinned-period joins, complete-case eligibility, natural-log transforms, ratios, shares, the weighted score, and the original strict **global-sample median** flag.
+- `vw_city_rankings`: within-city ranks, percent-ranks, city means/deviations, and deterministic top/bottom selection orders. Housing rank 1 means **most expensive**, not most affordable.
+
+Normal loads install both views in the same transaction as the source updates.
+To install or refresh only their definitions on existing tables, run
+`python -m walkability.pipeline --views-only`. This mode does not read source CSVs,
+call Census, or write source data; it cannot be combined with source-file arguments
+or `--validate-only`.
+
+`walkability.database.read_analysis_data()` returns `(features_df, rankings_df,
+source_audit_df)` from one read-only, repeatable-read snapshot. It validates keys,
+periods, finite values, membership, and source-fact coverage, then closes the
+connection. Features retain the reference notebook's ordered 35-column contract.
+There is no automatic API/CSV fallback. `sql/analysis.sql` contains four standalone
+SELECT examples: city summaries, global candidates, city-mean contrasts, and a
+source-completeness audit. The city-mean comparison is supplemental, not a
+replacement for the global-median screen.
+
+**Local integration verification:** view installation succeeded twice; the reader
+returned **248 eligible ZCTAs**, **51 flagged candidates**, and **250 source-audit
+rows**. All 35 feature fields matched the current reference notebook calculations
+on the same local inputs (numeric tolerance `1e-12`, ISO date strings); both SQL
+rank columns matched independent pandas calculations. ZCTAs `10037` and `60602`
+remain excluded for missing home-value estimates. The original notebook's file
+hash was unchanged.
+
+**Full notebook verification (2026-10-24):** all seven code cells ran sequentially
+in the project kernel, including 248 mapped ZCTAs, OLS, KMeans with 100 bootstrap
+resamples, and nested leave-one-city-out Lasso. Mapping and model code match the
+reference exactly. Primary walkability coefficient: `-1.9094687514`, HC3
+`p=0.0011153005`, `R²=0.7832398510`; bootstrap median ARI: `0.8997612921`;
+held-out-city Lasso `R²=-1.8790964340`. The findings remain unchanged. Large OLS
+condition numbers remain visible as a scaling/multicollinearity caution, not
+something retuned during migration.
+
+Fault injection of invalid view SQL verified that earlier source upserts roll
+back completely. CLI isolation checks verified that `--views-only` does not call
+extraction or read Census configuration, and conflicting modes fail before IO.
+These are local checks, **not yet a committed automated test suite or CI**.
+
+## Run the PostgreSQL Analysis Notebook
+
+1. Complete the package, PostgreSQL and data setup above and load the source tables.
+2. Start the existing database with `docker compose up -d` if stopped.
+3. If tables predate the views, run `python -m walkability.pipeline --views-only`.
+4. Open `notebooks/walkability_analysis_postgres.ipynb`, select `.venv`, then choose
+   **Restart Kernel and Run All Cells**.
+
+Analysis execution requires the configured database and local ZCTA geometry, but
+does not require a Census API key or read the Zillow/ACS source CSVs. It performs
+no data loading, view installation or source-file writes. Sample assertions fail
+clearly if the established inputs change; investigate provenance before changing
+published findings.
 
 ## Run the Reference Notebook
+
+The preserved notebook is an independent historical reference, not the primary
+PostgreSQL workflow. Running it contacts Census and rewrites the local ACS extract;
+it is not necessary to run it when using the PostgreSQL-backed notebook.
 
 In VS Code:
 
@@ -283,8 +343,9 @@ walkability-project/
 │   └── housing/
 │       └── Zip_zhvi_uc_sfrcondo_*.csv       # Downloaded manually
 ├── notebooks/
-│   └── walkability_analysis.ipynb
-├── src/walkability/                         # Stage 1 extraction/preparation/loading
+│   ├── walkability_analysis_postgres.ipynb  # Current SQL-backed analysis
+│   └── walkability_analysis.ipynb           # Preserved independent reference
+├── src/walkability/                         # Extraction/loading and read-only SQL reader
 │   ├── __init__.py
 │   ├── config.py
 │   ├── extract.py
@@ -292,7 +353,9 @@ walkability-project/
 │   ├── database.py
 │   └── pipeline.py
 ├── sql/
-│   └── schema.sql                          # Three source tables and constraints
+│   ├── schema.sql                          # Three source tables and constraints
+│   ├── views.sql                           # Analytical features and city rankings
+│   └── analysis.sql                        # Four standalone analytical SELECTs
 ├── compose.yaml                            # Local PostgreSQL 17 only
 ├── pyproject.toml                          # Editable package; deps from requirements.txt
 ├── .env.example

@@ -9,6 +9,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 ZILLOW_PATH = DATA_DIR / "housing" / "Zip_zhvi_uc_sfrcondo_tier_0.33_0.67_sm_sa_month.csv"
 ACS_PATH = DATA_DIR / "acs" / "acs_zip_2022.csv"
 SCHEMA_PATH = PROJECT_ROOT / "sql" / "schema.sql"
+VIEWS_PATH = PROJECT_ROOT / "sql" / "views.sql"
 ZHVI_DATE = date(2025, 3, 31)
 ACS_YEAR = 2022
 
