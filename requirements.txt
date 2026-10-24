@@ -15,6 +15,9 @@ seaborn==0.13.2
 # HTTP/API access
 requests==2.34.2
 
+# PostgreSQL access (binary wheel avoids a separate local libpq installation)
+psycopg[binary]==3.3.5
+
 # Statistical and machine-learning models
 scikit-learn==1.9.0
 statsmodels==0.14.6

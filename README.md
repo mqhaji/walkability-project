@@ -4,6 +4,8 @@ A ZIP/ZCTA-level comparison of whether the apparent relationship between commute
 
 > **Project status:** This repository preserves the current validated version of an inherited exploratory analysis. Data definitions and the research framing were refined during a technical audit and after preliminary results had been examined. The findings are therefore descriptive and diagnostic rather than a preregistered confirmatory test.
 
+> **Pipeline upgrade — Stage 1:** A small Python package and PostgreSQL source-table loader are now provided alongside the unchanged reference notebook. SQL analytical views, notebook migration, pytest/CI, and Power BI are later stages; the current statistical results were not produced from PostgreSQL.
+
 ## Research Objective
 
 The project asks:
@@ -124,6 +126,9 @@ Keep all extracted sidecar files (`.dbf`, `.shx`, `.prj`, and `.cpg`) in the sam
 ## Install the Python Environment
 
 Python 3.13 is recommended. Run these commands from the repository root.
+The editable install makes `walkability` importable and uses `requirements.txt`
+as the single source of runtime dependencies. Keep the checkout in place: the
+package reads the versioned SQL and local inputs from this repository.
 
 ### macOS or Linux
 
@@ -131,7 +136,7 @@ Python 3.13 is recommended. Run these commands from the repository root.
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
 ### Windows PowerShell
@@ -140,10 +145,103 @@ python -m pip install -r requirements.txt
 py -3.13 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
-## Run the Notebook
+## Stage 1: Load the PostgreSQL Source Tables
+
+The new pipeline currently stops at **Python extraction/validation → PostgreSQL**.
+The reference notebook still runs independently and is intentionally unchanged.
+Geometry stays in GeoPandas; PostgreSQL stores no polygons and needs no PostGIS.
+
+### Start a local database
+
+1. Install and start [Docker Desktop](https://www.docker.com/products/docker-desktop/), or use an existing PostgreSQL 17 database.
+2. Add the PostgreSQL entries from `.env.example` to your ignored `.env`. Preserve your existing Census key and choose a local `POSTGRES_PASSWORD`.
+3. From the repository root, start the dedicated database:
+
+   ```bash
+   docker compose up -d --wait
+   ```
+
+The Compose service binds only to `127.0.0.1` and persists data in a Docker volume.
+It is for local development, not a production deployment. An existing server can
+be used instead by setting the same connection variables; the loader needs a
+dedicated database and permission to create tables and insert/update rows in `public`.
+Never print or commit connection passwords or resolved Compose configuration.
+
+### How the local password works
+
+- `POSTGRES_PASSWORD` is a separate password for the local PostgreSQL login, not your macOS, Docker, or Census password.
+- On first initialization of an empty volume, the PostgreSQL image creates the `POSTGRES_USER` login and `POSTGRES_DB` database using that password. The default names are both `walkability`.
+- Docker Compose reads `.env` when starting the service; the Python loader reads the same settings when connecting to `localhost:5432`. Exported environment variables take precedence, so avoid conflicting values.
+- Keep the real password only in the ignored `.env`; `.env.example` intentionally has an empty placeholder. On macOS, restrict `.env` to owner read/write permissions. These controls do not encrypt the file or protect it from someone with access to your account or Docker.
+- Stopping/restarting the container preserves credentials and tables in the named volume. Editing `.env` alone does **not** change an existing database password: a password change must update the PostgreSQL role and the local setting together. Do not delete the volume just to change a password.
+
+This uses the PostgreSQL image's bootstrap administrator for a localhost-only
+development database. A deployed database would require more restrictive roles
+and a different approach to secret management.
+
+### Extract, validate, and load
+
+With the Python environment activated:
+
+```bash
+python -m walkability.pipeline
+```
+
+This reads the pinned Zillow month, downloads the two 2022 ACS tables, validates
+the selected sources, applies `sql/schema.sql`, and upserts all three tables in
+one transaction. Database errors roll back the entire load. A successful API-based
+load also exports the same ignored `data/acs/acs_zip_2022.csv` for inspection.
+
+To explicitly reuse the existing trusted **2022** ACS extract rather than make an
+API request:
+
+```bash
+python -m walkability.pipeline --acs-file data/acs/acs_zip_2022.csv
+```
+
+The legacy CSV contains no vintage column: its 2022 provenance is the caller's
+responsibility. There is no automatic cache fallback on API failure. To validate
+inputs without PostgreSQL or any file writes, add `--validate-only` to either command.
+
+### Table contracts and expected checks
+
+| Table | Grain / primary key | Contents |
+|---|---|---|
+| `dim_geography` | `zcta` | Study area and Zillow city/county/state assignments |
+| `fact_housing` | `(zcta, observation_date)` | Positive finite ZHVI; pinned load date `2025-03-31` |
+| `fact_acs` | `(zcta, acs_year)` | Demographic, housing, and commuting estimates; pinned load year `2022` |
+
+- ZCTA keys stay five-digit text. Foreign keys prevent orphan facts.
+- Percentages stay in their original **0–100** units; later SQL views will derive shares and features.
+- Floating-point estimates retain the notebook's precision, without extra currency rounding.
+- Unavailable ACS amounts/counts remain `NULL`, never zero. Invalid available values fail validation.
+- The reference inputs should load **250 rows per table**: NYC 172, Chicago 56, DC 22.
+- The two unavailable ACS home-value estimates remain in the source table. The **248-row analytical filter belongs to Stage 2**, not the loader.
+- Repeating the same load updates matching keys without duplicates. Unexpected existing keys for the current sample/period abort the load rather than being silently deleted. The script does not erase historical fact periods.
+- `CREATE TABLE IF NOT EXISTS` makes setup repeatable; it is not a schema-migration framework. The loader targets a dedicated database with this exact schema.
+
+Stop the local database with `docker compose stop`; the volume is retained. Changing
+the password in `.env` does not change credentials in an already initialized volume.
+Do not delete that volume unless you intentionally want to discard its database.
+
+**Stage 1 verification (2026-09-10):** live ACS extraction and explicit local-CSV
+preparation pass. The trusted local inputs load into PostgreSQL 17 with **250 rows
+per table**, and all stored values match the prepared inputs exactly. Repeated
+loads preserve keys and values without duplicates. An intentionally invalid ACS
+percentage causes the entire load to roll back, including earlier geography and
+housing updates. Primary/foreign keys, required values, finite housing values,
+positive population, and study assignments were checked against the running
+database. The two unavailable home values remain SQL `NULL`.
+
+The existing Python environment was restored on Python 3.13.15; dependency and
+scientific-library import checks pass. The reference notebook remains unchanged.
+These are local verification checks, **not yet a committed pytest suite or CI**.
+SQL analytical views and notebook migration remain Stage 2.
+
+## Run the Reference Notebook
 
 In VS Code:
 
@@ -186,6 +284,17 @@ walkability-project/
 │       └── Zip_zhvi_uc_sfrcondo_*.csv       # Downloaded manually
 ├── notebooks/
 │   └── walkability_analysis.ipynb
+├── src/walkability/                         # Stage 1 extraction/preparation/loading
+│   ├── __init__.py
+│   ├── config.py
+│   ├── extract.py
+│   ├── prepare.py
+│   ├── database.py
+│   └── pipeline.py
+├── sql/
+│   └── schema.sql                          # Three source tables and constraints
+├── compose.yaml                            # Local PostgreSQL 17 only
+├── pyproject.toml                          # Editable package; deps from requirements.txt
 ├── .env.example
 ├── .gitignore
 ├── README.md
