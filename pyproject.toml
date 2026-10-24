@@ -11,6 +11,7 @@ dynamic = ["dependencies"]
 
 [project.scripts]
 walkability-load = "walkability.pipeline:main"
+walkability-analyze = "walkability.analysis:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -283,6 +283,39 @@ back completely. CLI isolation checks verified that `--views-only` does not call
 extraction or read Census configuration, and conflicting modes fail before IO.
 These are local checks, **not yet a committed automated test suite or CI**.
 
+## Run the Models Without a Notebook
+
+Run `python -m walkability.analysis` from the installed project environment.
+This reads the PostgreSQL views, fits the existing OLS, KMeans/bootstrap and
+city-grouped Lasso models, and saves results under `outputs/analysis/`.
+Use `--output-dir` to choose a different destination. Repeating a run replaces
+files with the same names; the output directory is not an archive of past runs.
+
+Exports include model coefficients, cluster diagnostics and assignments,
+held-out-city predictions and errors, SQL rankings, source audit, summary metrics,
+and a prediction chart. Generated outputs are ignored by Git. The command does
+not read either notebook or contact Census. No notebook kernel or geometry file
+is needed for this statistical run.
+
+**Local verification (2026-10-24):** primary and sensitivity OLS coefficients,
+HC3 standard errors and p-values, all 248 transfer predictions, all bootstrap
+scores, clustering diagnostics and final Lasso coefficients match the notebook
+calculations (absolute/relative tolerance `1e-10`). Cluster partitions agree
+exactly. The OLS summary export includes fit statistics and condition numbers;
+the existing numerical cautions still apply.
+
+Run the four small offline tests with `python -m unittest discover -s tests -v`.
+They check rank-deficient OLS inputs, HC3/city indicators, grouped Lasso setup
+and safe database-error messages. They require the installed project packages,
+but no PostgreSQL server, source files or API keys. The full numerical comparison
+was a separate local check, not part of these four tests. CI remains pending.
+
+**Remaining presentation work:** the script currently exports the prediction
+chart, not the notebook's complete map and diagnostic figure collection. Keep
+the notebooks as references until those figures and broader parity checks are
+finished. A failed export can leave partial output files; treat a run as complete
+only when the command reports success.
+
 ## Run the PostgreSQL Analysis Notebook
 
 1. Complete the package, PostgreSQL and data setup above and load the source tables.

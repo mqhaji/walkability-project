@@ -26,6 +26,7 @@ dist/
 .idea/
 
 # Logs and temporary files
+outputs/
 *.log
 *.tmp
 
