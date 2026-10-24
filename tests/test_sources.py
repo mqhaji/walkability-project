@@ -1,11 +1,11 @@
 """Invented source records and mocked Census requests; no external data needed."""
 
-from contextlib import redirect_stdout
 import io
-from pathlib import Path
-from tempfile import TemporaryDirectory
 import traceback
 import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -13,10 +13,20 @@ import pandas as pd
 import requests
 
 from walkability import extract, pipeline
-from walkability.config import ACS_YEAR, DETAILED_VARIABLES, PROFILE_VARIABLES, ZHVI_DATE
+from walkability.config import (
+    ACS_YEAR,
+    DETAILED_VARIABLES,
+    PROFILE_VARIABLES,
+    ZHVI_DATE,
+)
 from walkability.database import TABLE_COLUMNS
 from walkability.prepare import (
-    ACS_COLUMNS, normalize_zcta, prepare_acs, prepare_tables, prepare_zillow, validate_acs,
+    ACS_COLUMNS,
+    normalize_zcta,
+    prepare_acs,
+    prepare_tables,
+    prepare_zillow,
+    validate_acs,
 )
 
 
@@ -32,18 +42,26 @@ def zillow_source():
         ("60601", "Chicago", "Cook County", "IL"),
     ]
     frame = pd.DataFrame(rows, columns=["RegionName", "City", "CountyName", "State"])
-    frame[ZHVI_DATE.isoformat()] = 250_000.
+    frame[ZHVI_DATE.isoformat()] = 250_000.0
     return frame
 
 
 def acs_extract(keys=("60601",)):
     values = {
-        "ZIP": list(keys), "NAME": "Invented ZCTA",
-        "Median_Income": 60_000., "Median_Rent": 1_000.,
-        "Median_Home_Value": 200_000., "Percent_Car": 60.,
-        "Percent_Public_Transit": 20., "Percent_Walk": 10., "Percent_Bike": 2.,
-        "Commute_Time_Min": 25., "Percent_Renter": 40., "Percent_Owner": 60.,
-        "Percent_Bachelors_Plus": 30., "Total_Population": 1_000.,
+        "ZIP": list(keys),
+        "NAME": "Invented ZCTA",
+        "Median_Income": 60_000.0,
+        "Median_Rent": 1_000.0,
+        "Median_Home_Value": 200_000.0,
+        "Percent_Car": 60.0,
+        "Percent_Public_Transit": 20.0,
+        "Percent_Walk": 10.0,
+        "Percent_Bike": 2.0,
+        "Commute_Time_Min": 25.0,
+        "Percent_Renter": 40.0,
+        "Percent_Owner": 60.0,
+        "Percent_Bachelors_Plus": 30.0,
+        "Total_Population": 1_000.0,
     }
     return pd.DataFrame(values)[ACS_COLUMNS]
 
@@ -51,12 +69,16 @@ def acs_extract(keys=("60601",)):
 def api_tables():
     """One valid invented record in each Census response's actual column layout."""
     values = acs_extract().iloc[0].to_dict()
-    values.update(Percent_Drove_Alone=50., Percent_Carpooled=10.)
-    profile = {variable: str(values[label]) for label, variable in PROFILE_VARIABLES.items()}
+    values.update(Percent_Drove_Alone=50.0, Percent_Carpooled=10.0)
+    profile = {
+        variable: str(values[label]) for label, variable in PROFILE_VARIABLES.items()
+    }
     profile.update(NAME="Invented ZCTA", **{"zip code tabulation area": "60601"})
     detailed = {
-        "NAME": "Invented ZCTA", "zip code tabulation area": "60601",
-        "B08301_001E": "200", "B08301_018E": "4",
+        "NAME": "Invented ZCTA",
+        "zip code tabulation area": "60601",
+        "B08301_001E": "200",
+        "B08301_018E": "4",
     }
     return pd.DataFrame([profile]), pd.DataFrame([detailed])
 
@@ -67,13 +89,15 @@ class PreparationTests(unittest.TestCase):
             pd.Series([True]),
             pd.Series([np.bool_(False)]),
             pd.Series([True], dtype="boolean"),
-            pd.Series([1., True], dtype=object),
+            pd.Series([1.0, True], dtype=object),
             pd.Series([np.bool_(True), pd.NA], dtype="boolean"),
         ]
         for column in ["Percent_Renter", "Median_Income", "Total_Population"]:
             for values in variants:
-                with self.subTest(column=column, dtype=str(values.dtype), values=values.tolist()):
-                    keys = ["60601", "60602"][:len(values)]
+                with self.subTest(
+                    column=column, dtype=str(values.dtype), values=values.tolist()
+                ):
+                    keys = ["60601", "60602"][: len(values)]
                     source = acs_extract(keys)
                     source[column] = values
                     with self.assertRaisesRegex(ValueError, "Boolean"):
@@ -86,8 +110,10 @@ class PreparationTests(unittest.TestCase):
             validate_acs(cached, {"60601"})
 
     def test_keys_preserve_leading_zeros_and_reject_malformed_values(self):
-        self.assertEqual(normalize_zcta(pd.Series([" 1234 ", "00501", 60601])).tolist(),
-                         ["01234", "00501", "60601"])
+        self.assertEqual(
+            normalize_zcta(pd.Series([" 1234 ", "00501", 60601])).tolist(),
+            ["01234", "00501", "60601"],
+        )
         for value in [None, pd.NA, "", "123456", "12.0", 1234.5, "abc", True]:
             with self.subTest(value=value):
                 with self.assertRaises(ValueError):
@@ -95,19 +121,27 @@ class PreparationTests(unittest.TestCase):
 
     def test_city_filters_reject_nearby_but_out_of_scope_rows(self):
         source = zillow_source()
-        distractors = pd.DataFrame([
-            ["11001", "New York", "Nassau County", "NY", 250_000.],
-            ["99901", "New York", "Bronx County", "NJ", 250_000.],
-            ["20002", "Other", "District of Columbia", "DC", 250_000.],
-            ["60602", "Other", "Cook County", "IL", 250_000.],
-            ["60603", "Chicago", "DuPage County", "IL", 250_000.],
-            ["60604", "Chicago", "Cook County", "IN", 250_000.],
-        ], columns=source.columns)
+        distractors = pd.DataFrame(
+            [
+                ["11001", "New York", "Nassau County", "NY", 250_000.0],
+                ["99901", "New York", "Bronx County", "NJ", 250_000.0],
+                ["20002", "Other", "District of Columbia", "DC", 250_000.0],
+                ["60602", "Other", "Cook County", "IL", 250_000.0],
+                ["60603", "Chicago", "DuPage County", "IL", 250_000.0],
+                ["60604", "Chicago", "Cook County", "IN", 250_000.0],
+            ],
+            columns=source.columns,
+        )
         result = prepare_zillow(pd.concat([source, distractors], ignore_index=True))
         self.assertEqual(set(result["ZIP"]), set(source["RegionName"]))
-        self.assertEqual(result.groupby("Study_Area").size().to_dict(), {
-            "Chicago": 1, "New York City": 5, "Washington DC": 1,
-        })
+        self.assertEqual(
+            result.groupby("Study_Area").size().to_dict(),
+            {
+                "Chicago": 1,
+                "New York City": 5,
+                "Washington DC": 1,
+            },
+        )
         self.assertTrue(result["ZHVI_Date"].eq(ZHVI_DATE).all())
 
     def test_zillow_requires_unique_complete_geography_and_positive_finite_value(self):
@@ -118,7 +152,7 @@ class PreparationTests(unittest.TestCase):
             pd.concat([source, source.iloc[:1]], ignore_index=True),
             source.drop(columns=[ZHVI_DATE.isoformat()]),
         ]
-        for value in [0., -1., np.inf, np.nan, True, "bad"]:
+        for value in [0.0, -1.0, np.inf, np.nan, True, "bad"]:
             invalid = source.copy()
             invalid[ZHVI_DATE.isoformat()] = pd.Series([value] * len(source))
             cases.append(invalid)
@@ -131,20 +165,31 @@ class PreparationTests(unittest.TestCase):
         source = acs_extract(("60601", "60602"))
         for column in ACS_COLUMNS[2:]:
             source[column] = source[column].astype("string")
-        nullable = ["Median_Income", "Median_Rent", "Median_Home_Value", "Commute_Time_Min", "Total_Population"]
+        nullable = [
+            "Median_Income",
+            "Median_Rent",
+            "Median_Home_Value",
+            "Commute_Time_Min",
+            "Total_Population",
+        ]
         source.loc[0, nullable] = pd.NA
         result = validate_acs(source, {"60601", "60602"})
         self.assertTrue(result.loc[0, nullable].isna().all())
-        self.assertEqual(result.loc[1, "Median_Income"], 60_000.)
-        self.assertEqual(result.loc[1, "Percent_Renter"], 40.)
+        self.assertEqual(result.loc[1, "Median_Income"], 60_000.0)
+        self.assertEqual(result.loc[1, "Percent_Renter"], 40.0)
 
     def test_cached_acs_rejects_bad_values_keys_and_coverage(self):
         source = acs_extract()
         for column, value in [
-            ("Percent_Walk", -1.), ("Percent_Walk", 101.), ("Percent_Walk", np.nan),
-            ("Median_Income", 0.), ("Median_Rent", -1.),
-            ("Commute_Time_Min", -1.), ("Total_Population", 1.5),
-            ("Median_Home_Value", np.inf), ("Percent_Renter", "True"),
+            ("Percent_Walk", -1.0),
+            ("Percent_Walk", 101.0),
+            ("Percent_Walk", np.nan),
+            ("Median_Income", 0.0),
+            ("Median_Rent", -1.0),
+            ("Commute_Time_Min", -1.0),
+            ("Total_Population", 1.5),
+            ("Median_Home_Value", np.inf),
+            ("Percent_Renter", "True"),
         ]:
             with self.subTest(column=column, value=value):
                 invalid = source.copy()
@@ -165,13 +210,19 @@ class PreparationTests(unittest.TestCase):
         profile["DP04_0089E"] = "-666666666"
         result = prepare_acs(profile, detailed, {"60601"})
         self.assertTrue(pd.isna(result.loc[0, "Median_Home_Value"]))
-        self.assertEqual(result.loc[0, "Percent_Car"], 60.)
-        self.assertEqual(result.loc[0, "Percent_Bike"], 2.)  # 100 * 4 / 200.
+        self.assertEqual(result.loc[0, "Percent_Car"], 60.0)
+        self.assertEqual(result.loc[0, "Percent_Bike"], 2.0)  # 100 * 4 / 200.
 
     def test_api_worker_counts_and_coverage_are_validated(self):
         profile, detailed = api_tables()
-        for workers, bicycles in [(0, 0), (200, 201), (200.5, 4), (200, 4.5),
-                                  (-666666666, 4), (200, -666666666)]:
+        for workers, bicycles in [
+            (0, 0),
+            (200, 201),
+            (200.5, 4),
+            (200, 4.5),
+            (-666666666, 4),
+            (200, -666666666),
+        ]:
             with self.subTest(workers=workers, bicycles=bicycles):
                 invalid = detailed.copy()
                 invalid["B08301_001E"] = str(workers)
@@ -233,18 +284,32 @@ class ExtractionTests(unittest.TestCase):
             actual_profile, actual_detailed = extract.fetch_acs("invented-key")
         pd.testing.assert_frame_equal(actual_profile, profile)
         pd.testing.assert_frame_equal(actual_detailed, detailed)
-        self.assertEqual([call.args[0] for call in get.call_args_list], [
-            "https://api.census.gov/data/2022/acs/acs5/profile",
-            "https://api.census.gov/data/2022/acs/acs5",
-        ])
-        for call, variables in zip(get.call_args_list, [PROFILE_VARIABLES, DETAILED_VARIABLES]):
+        self.assertEqual(
+            [call.args[0] for call in get.call_args_list],
+            [
+                "https://api.census.gov/data/2022/acs/acs5/profile",
+                "https://api.census.gov/data/2022/acs/acs5",
+            ],
+        )
+        for call, variables in zip(
+            get.call_args_list, [PROFILE_VARIABLES, DETAILED_VARIABLES]
+        ):
             self.assertEqual(call.kwargs["timeout"], 60)
-            self.assertEqual(call.kwargs["params"]["get"], ",".join(["NAME", *variables.values()]))
+            self.assertEqual(
+                call.kwargs["params"]["get"], ",".join(["NAME", *variables.values()])
+            )
             self.assertEqual(call.kwargs["params"]["key"], "invented-key")
 
     def test_malformed_census_responses_are_rejected(self):
-        for payload in [{"error": "bad"}, [], [["NAME"]], [["NAME", "NAME"], ["A", "B"]],
-                        [[1], ["A"]], [["NAME"], []], [["NAME"], "not a row"]]:
+        for payload in [
+            {"error": "bad"},
+            [],
+            [["NAME"]],
+            [["NAME", "NAME"], ["A", "B"]],
+            [[1], ["A"]],
+            [["NAME"], []],
+            [["NAME"], "not a row"],
+        ]:
             with self.subTest(payload=payload):
                 response = Mock(headers={"content-type": "application/json"})
                 response.json.return_value = payload
@@ -258,7 +323,11 @@ class ExtractionTests(unittest.TestCase):
 
     def test_census_failures_do_not_leak_raw_messages_or_chained_errors(self):
         private = "https://example.invalid/?key=invented-secret"
-        for failure in [requests.Timeout(private), requests.HTTPError(private), ValueError(private)]:
+        for failure in [
+            requests.Timeout(private),
+            requests.HTTPError(private),
+            ValueError(private),
+        ]:
             with self.subTest(exception=type(failure).__name__):
                 response = Mock(headers={"content-type": "application/json"})
                 if isinstance(failure, requests.RequestException):
@@ -274,7 +343,9 @@ class ExtractionTests(unittest.TestCase):
                         self.assertTrue(error.__suppress_context__)
                     else:
                         self.fail("Expected Census failure")
-        with patch.object(extract.requests, "get", side_effect=requests.ConnectionError(private)):
+        with patch.object(
+            extract.requests, "get", side_effect=requests.ConnectionError(private)
+        ):
             with self.assertRaises(RuntimeError) as caught:
                 extract.fetch_acs("invented-key")
         self.assertNotIn(private, "".join(traceback.format_exception(caught.exception)))
@@ -288,9 +359,17 @@ class ExtractionTests(unittest.TestCase):
             with (
                 patch("sys.argv", ["load", "--validate-only", "--acs-file", str(path)]),
                 patch.object(pipeline, "read_zillow", return_value=source),
-                patch.object(pipeline, "database_settings", side_effect=AssertionError("DB access")),
-                patch.object(pipeline, "load_tables", side_effect=AssertionError("DB write")),
-                patch.object(pipeline, "fetch_acs", side_effect=AssertionError("API call")),
+                patch.object(
+                    pipeline,
+                    "database_settings",
+                    side_effect=AssertionError("DB access"),
+                ),
+                patch.object(
+                    pipeline, "load_tables", side_effect=AssertionError("DB write")
+                ),
+                patch.object(
+                    pipeline, "fetch_acs", side_effect=AssertionError("API call")
+                ),
                 redirect_stdout(io.StringIO()),
             ):
                 self.assertEqual(pipeline.main(), 0)

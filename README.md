@@ -210,6 +210,24 @@ Concurrent runs into the same destination are not supported.
 
 ## Tests and Verification
 
+### Python formatting and lint checks
+
+For development, install `python -m pip install -e ".[dev]"`. This adds a pinned
+version of Ruff; normal analysis runs do not need it.
+
+- Check common mistakes, unused imports and import order:
+  `python -m ruff check src tests`.
+- Check formatting: `python -m ruff format --check src tests`.
+- Apply import fixes: `python -m ruff check --select I --fix src tests`, then
+  format with `python -m ruff format src tests`.
+
+CI runs both checks without changing files. The rules stay small: basic Python
+errors and import order, plus consistent formatting. Notebooks, SQL, data and
+local planning notes are outside these checks. Formatting does not replace tests
+or a review of the results.
+
+### Automated tests
+
 Run `python -m unittest discover -s tests -v` for the offline tests. They check
 source parsing and preparation, the three-city requirement, model setup, safe
 errors, output cleanup, figure rendering and map coverage. Invented records and

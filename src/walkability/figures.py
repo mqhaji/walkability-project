@@ -2,10 +2,10 @@
 
 from pathlib import Path
 
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
 import pandas as pd
 import seaborn as sns
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 
 
 class GeometryInputError(ValueError):
@@ -40,22 +40,44 @@ def save_diagnostics(
     clustered = features.merge(
         results["cluster_assignments"], on=["Study_Area", "ZIP"], validate="one_to_one"
     )
-    if len(clustered) != len(features) or len(clustered) != len(results["cluster_assignments"]):
-        raise ValueError("Cluster assignments must cover every analytical observation exactly once.")
+    if len(clustered) != len(features) or len(clustered) != len(
+        results["cluster_assignments"]
+    ):
+        raise ValueError(
+            "Cluster assignments must cover every analytical observation exactly once."
+        )
     columns = [
-        "Log_ZHVI", "Walkability_Score", "Income_to_Rent", "Home_Value_to_Income",
-        "Walk_Share", "Transit_Share", "Bike_Share", "Car_Share", "Commute_Min",
-        "Rent_Share", "Owner_Share", "College_Grad_Share", "Population_k",
+        "Log_ZHVI",
+        "Walkability_Score",
+        "Income_to_Rent",
+        "Home_Value_to_Income",
+        "Walk_Share",
+        "Transit_Share",
+        "Bike_Share",
+        "Car_Share",
+        "Commute_Min",
+        "Rent_Share",
+        "Owner_Share",
+        "College_Grad_Share",
+        "Population_k",
     ]
     figure = _figure((12, 10))
     ax = figure.subplots()
     sns.heatmap(
-        features[columns].corr(), annot=True, cmap="coolwarm", fmt=".2f",
-        square=True, cbar_kws={"shrink": 0.7}, ax=ax,
+        features[columns].corr(),
+        annot=True,
+        cmap="coolwarm",
+        fmt=".2f",
+        square=True,
+        cbar_kws={"shrink": 0.7},
+        ax=ax,
     )
     ax.set_title("Housing and mobility correlations")
-    _save(figure, output_dir / "correlations.png",
-          "Pairwise associations describe this sample; they do not establish causal effects.")
+    _save(
+        figure,
+        output_dir / "correlations.png",
+        "Pairwise associations describe this sample; they do not establish causal effects.",
+    )
 
     figure = _figure((11, 5))
     axes = figure.subplots(1, 2)
@@ -64,18 +86,34 @@ def save_diagnostics(
     for ax, (column, title) in zip(axes, panels):
         ax.plot(quality["k"], quality[column], marker="o")
         ax.set(title=title, xlabel="Number of clusters", ylabel=column.capitalize())
-    _save(figure, output_dir / "cluster_diagnostics.png",
-          "Compare dispersion and separation across candidate cluster counts; clustering is exploratory.")
+    _save(
+        figure,
+        output_dir / "cluster_diagnostics.png",
+        "Compare dispersion and separation across candidate cluster counts; clustering is exploratory.",
+    )
 
     figure = _figure((10, 7))
     ax = figure.subplots()
     sns.scatterplot(
-        data=clustered, x="Walkability_Score", y="Log_ZHVI", hue="Cluster",
-        palette="Set2", s=60, edgecolor="k", ax=ax,
+        data=clustered,
+        x="Walkability_Score",
+        y="Log_ZHVI",
+        hue="Cluster",
+        palette="Set2",
+        s=60,
+        edgecolor="k",
+        ax=ax,
     )
-    ax.set(title="Exploratory ZIP/ZCTA profiles", xlabel="Walkability score", ylabel="Log ZHVI")
-    _save(figure, output_dir / "cluster_profiles.png",
-          "Colors identify four-feature KMeans profiles, not ranked neighborhood types or causal groups.")
+    ax.set(
+        title="Exploratory ZIP/ZCTA profiles",
+        xlabel="Walkability score",
+        ylabel="Log ZHVI",
+    )
+    _save(
+        figure,
+        output_dir / "cluster_profiles.png",
+        "Colors identify four-feature KMeans profiles, not ranked neighborhood types or causal groups.",
+    )
 
     figure = _figure((9, 7))
     ax = figure.subplots()
@@ -85,8 +123,11 @@ def save_diagnostics(
         title="Lasso coefficients after city-grouped penalty selection",
         xlabel="Coefficient on standardized predictor",
     )
-    _save(figure, output_dir / "lasso_coefficients.png",
-          "Full-sample coefficients describe the fitted model; held-out-city predictions measure transfer.")
+    _save(
+        figure,
+        output_dir / "lasso_coefficients.png",
+        "Full-sample coefficients describe the fitted model; held-out-city predictions measure transfer.",
+    )
 
 
 def save_maps(features: pd.DataFrame, geometry_path: Path, output_dir: Path) -> int:
@@ -104,13 +145,19 @@ def save_maps(features: pd.DataFrame, geometry_path: Path, output_dir: Path) -> 
         raise GeometryInputError("Geometry must contain the ZCTA5CE20 field.")
     geometry["ZIP"] = geometry["ZCTA5CE20"].astype("string").str.zfill(5)
     geometry = geometry.loc[geometry["ZIP"].isin(features["ZIP"]), ["ZIP", "geometry"]]
-    if geometry["ZIP"].duplicated().any() or set(geometry["ZIP"]) != set(features["ZIP"]):
-        raise GeometryInputError("Each analytical ZCTA must match exactly one geometry.")
+    if geometry["ZIP"].duplicated().any() or set(geometry["ZIP"]) != set(
+        features["ZIP"]
+    ):
+        raise GeometryInputError(
+            "Each analytical ZCTA must match exactly one geometry."
+        )
     mapped = geometry.merge(features, on="ZIP", validate="one_to_one")
     if mapped.geometry.isna().any() or mapped.geometry.is_empty.any():
         raise GeometryInputError("Analytical ZCTAs must have nonempty geometry.")
     if not mapped.geometry.is_valid.all():
-        raise GeometryInputError("Analytical ZCTAs contain invalid geometry; check the source file.")
+        raise GeometryInputError(
+            "Analytical ZCTAs contain invalid geometry; check the source file."
+        )
     low, high = features["Walkability_Score"].agg(["min", "max"])
     cities = [
         ("Chicago", "chicago"),
@@ -124,11 +171,20 @@ def save_maps(features: pd.DataFrame, geometry_path: Path, output_dir: Path) -> 
         figure = _figure((8, 8))
         ax = figure.subplots()
         subset.plot(
-            column="Walkability_Score", cmap="YlGnBu", linewidth=0.3,
-            edgecolor="white", legend=True, vmin=low, vmax=high, ax=ax,
+            column="Walkability_Score",
+            cmap="YlGnBu",
+            linewidth=0.3,
+            edgecolor="white",
+            legend=True,
+            vmin=low,
+            vmax=high,
+            ax=ax,
         )
         ax.set_title(f"Commute-mode walkability in {city}")
         ax.set_axis_off()
-        _save(figure, output_dir / f"map_{slug}.png",
-              "Retained ZCTAs use the same score scale across cities; boundaries do not define neighborhoods.")
+        _save(
+            figure,
+            output_dir / f"map_{slug}.png",
+            "Retained ZCTAs use the same score scale across cities; boundaries do not define neighborhoods.",
+        )
     return len(mapped)

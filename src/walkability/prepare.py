@@ -8,43 +8,78 @@ selection and derived features belong to the SQL layer.
 import numpy as np
 import pandas as pd
 
-from walkability.config import ACS_YEAR, DETAILED_VARIABLES, PROFILE_VARIABLES, ZHVI_DATE
+from walkability.config import (
+    ACS_YEAR,
+    DETAILED_VARIABLES,
+    PROFILE_VARIABLES,
+    ZHVI_DATE,
+)
 
 NYC_COUNTIES = {
-    "Bronx County", "Kings County", "New York County", "Queens County", "Richmond County"
+    "Bronx County",
+    "Kings County",
+    "New York County",
+    "Queens County",
+    "Richmond County",
 }
 STUDY_AREAS = {"Chicago", "New York City", "Washington DC"}
 PERCENT_COLUMNS = [
-    "Percent_Car", "Percent_Public_Transit", "Percent_Walk", "Percent_Bike",
-    "Percent_Renter", "Percent_Owner", "Percent_Bachelors_Plus",
+    "Percent_Car",
+    "Percent_Public_Transit",
+    "Percent_Walk",
+    "Percent_Bike",
+    "Percent_Renter",
+    "Percent_Owner",
+    "Percent_Bachelors_Plus",
 ]
 ACS_COLUMNS = [
-    "ZIP", "NAME", "Median_Income", "Median_Rent", "Median_Home_Value",
-    "Percent_Car", "Percent_Public_Transit", "Percent_Walk", "Percent_Bike",
-    "Commute_Time_Min", "Percent_Renter", "Percent_Owner",
-    "Percent_Bachelors_Plus", "Total_Population",
+    "ZIP",
+    "NAME",
+    "Median_Income",
+    "Median_Rent",
+    "Median_Home_Value",
+    "Percent_Car",
+    "Percent_Public_Transit",
+    "Percent_Walk",
+    "Percent_Bike",
+    "Commute_Time_Min",
+    "Percent_Renter",
+    "Percent_Owner",
+    "Percent_Bachelors_Plus",
+    "Total_Population",
 ]
 ACS_DB_NAMES = {
-    "ZIP": "zcta", "Median_Income": "median_income", "Median_Rent": "median_rent",
-    "Median_Home_Value": "median_home_value", "Percent_Car": "percent_car",
-    "Percent_Public_Transit": "percent_public_transit", "Percent_Walk": "percent_walk",
-    "Percent_Bike": "percent_bike", "Commute_Time_Min": "commute_minutes",
-    "Percent_Renter": "percent_renter", "Percent_Owner": "percent_owner",
-    "Percent_Bachelors_Plus": "percent_bachelors_plus", "Total_Population": "population",
+    "ZIP": "zcta",
+    "Median_Income": "median_income",
+    "Median_Rent": "median_rent",
+    "Median_Home_Value": "median_home_value",
+    "Percent_Car": "percent_car",
+    "Percent_Public_Transit": "percent_public_transit",
+    "Percent_Walk": "percent_walk",
+    "Percent_Bike": "percent_bike",
+    "Commute_Time_Min": "commute_minutes",
+    "Percent_Renter": "percent_renter",
+    "Percent_Owner": "percent_owner",
+    "Percent_Bachelors_Plus": "percent_bachelors_plus",
+    "Total_Population": "population",
 }
 
 
 def require_columns(frame: pd.DataFrame, columns: list[str], label: str) -> None:
     missing = sorted(set(columns) - set(frame.columns))
     if missing or frame.columns.duplicated().any():
-        raise ValueError(f"{label}: missing columns {missing} or duplicate column names.")
+        raise ValueError(
+            f"{label}: missing columns {missing} or duplicate column names."
+        )
 
 
 def normalize_zcta(values: pd.Series) -> pd.Series:
     """Pad short digit-only keys; reject nulls, decimals, and overlong keys."""
     keys = values.astype("string").str.strip()
     if not keys.str.fullmatch(r"[0-9]{1,5}", na=False).all():
-        raise ValueError("ZCTA keys must contain one to five digits without missing values.")
+        raise ValueError(
+            "ZCTA keys must contain one to five digits without missing values."
+        )
     return keys.str.zfill(5)
 
 
@@ -68,15 +103,22 @@ def _numeric(values: pd.Series, label: str) -> pd.Series:
 
 def prepare_zillow(source: pd.DataFrame) -> pd.DataFrame:
     observation = ZHVI_DATE.isoformat()
-    require_columns(source, ["RegionName", "City", "CountyName", "State", observation], "Zillow")
+    require_columns(
+        source, ["RegionName", "City", "CountyName", "State", observation], "Zillow"
+    )
     nyc = source["State"].eq("NY") & source["CountyName"].isin(NYC_COUNTIES)
     dc = source["State"].eq("DC") & source["City"].eq("Washington")
     chicago = (
-        source["State"].eq("IL") & source["CountyName"].eq("Cook County")
+        source["State"].eq("IL")
+        & source["CountyName"].eq("Cook County")
         & source["City"].eq("Chicago")
     )
     selected = []
-    for mask, area in [(nyc, "New York City"), (dc, "Washington DC"), (chicago, "Chicago")]:
+    for mask, area in [
+        (nyc, "New York City"),
+        (dc, "Washington DC"),
+        (chicago, "Chicago"),
+    ]:
         rows = source.loc[mask].copy()
         rows["Study_Area"] = area
         selected.append(rows)
@@ -90,20 +132,27 @@ def prepare_zillow(source: pd.DataFrame) -> pd.DataFrame:
     require_unique_keys(result, "Zillow")
     if set(result["Study_Area"]) != STUDY_AREAS:
         raise ValueError("Zillow must contain all three study areas.")
-    if set(result.loc[result["Study_Area"].eq("New York City"), "County"]) != NYC_COUNTIES:
+    if (
+        set(result.loc[result["Study_Area"].eq("New York City"), "County"])
+        != NYC_COUNTIES
+    ):
         raise ValueError("NYC coverage must include all five borough counties.")
     if result[["City", "County", "State"]].isna().any().any():
         raise ValueError("Zillow geography assignments cannot be missing.")
     result["ZHVI_Date"] = ZHVI_DATE
-    return result[["ZIP", "City", "County", "State", "Study_Area", "ZHVI", "ZHVI_Date"]].sort_values(
-        ["Study_Area", "ZIP"]
-    ).reset_index(drop=True)
+    return (
+        result[["ZIP", "City", "County", "State", "Study_Area", "ZHVI", "ZHVI_Date"]]
+        .sort_values(["Study_Area", "ZIP"])
+        .reset_index(drop=True)
+    )
 
 
 def _prepare_acs_table(
     source: pd.DataFrame, variables: dict[str, str], selected_zctas: set[str]
 ) -> pd.DataFrame:
-    require_columns(source, ["NAME", "zip code tabulation area", *variables.values()], "ACS")
+    require_columns(
+        source, ["NAME", "zip code tabulation area", *variables.values()], "ACS"
+    )
     result = source.rename(columns={"zip code tabulation area": "ZIP"}).copy()
     result["ZIP"] = normalize_zcta(result["ZIP"])
     result = result.loc[result["ZIP"].isin(selected_zctas)].copy()
@@ -112,7 +161,9 @@ def _prepare_acs_table(
         raise ValueError("ACS table does not cover every selected Zillow ZCTA.")
     for label, variable in variables.items():
         values = _numeric(result.pop(variable), label)
-        result[label] = values.mask(values.lt(0))  # Census negative sentinels mean unavailable.
+        result[label] = values.mask(
+            values.lt(0)
+        )  # Census negative sentinels mean unavailable.
     return result
 
 
@@ -123,7 +174,9 @@ def prepare_acs(
     detailed = _prepare_acs_table(detailed, DETAILED_VARIABLES, selected_zctas)
     result = profile.merge(
         detailed[["ZIP", "Workers_16_Plus", "Bicycle_Workers"]],
-        on="ZIP", how="left", validate="one_to_one",
+        on="ZIP",
+        how="left",
+        validate="one_to_one",
     )
     workers = result["Workers_16_Plus"]
     bicycles = result["Bicycle_Workers"]
@@ -149,8 +202,15 @@ def validate_acs(source: pd.DataFrame, selected_zctas: set[str]) -> pd.DataFrame
         result[name] = _numeric(result[name], name)
     for name in PERCENT_COLUMNS:
         if result[name].isna().any() or not result[name].between(0, 100).all():
-            raise ValueError(f"{name}: expected nonmissing percentages between 0 and 100.")
-    for name in ["Median_Income", "Median_Rent", "Median_Home_Value", "Total_Population"]:
+            raise ValueError(
+                f"{name}: expected nonmissing percentages between 0 and 100."
+            )
+    for name in [
+        "Median_Income",
+        "Median_Rent",
+        "Median_Home_Value",
+        "Total_Population",
+    ]:
         if result[name].dropna().le(0).any():
             raise ValueError(f"{name}: available estimates must be positive.")
     if result["Commute_Time_Min"].dropna().lt(0).any():
@@ -165,16 +225,27 @@ def prepare_tables(zillow: pd.DataFrame, acs: pd.DataFrame) -> dict[str, pd.Data
     require_unique_keys(zillow, "Zillow")
     acs = validate_acs(acs, set(zillow["ZIP"]))
     # This explicit join audit guards against a future many-to-many merge.
-    coverage = zillow[["ZIP"]].merge(acs[["ZIP"]], on="ZIP", validate="one_to_one", how="outer", indicator=True)
+    coverage = zillow[["ZIP"]].merge(
+        acs[["ZIP"]], on="ZIP", validate="one_to_one", how="outer", indicator=True
+    )
     if not coverage["_merge"].eq("both").all():
         raise ValueError("Zillow/ACS merge must match one-to-one.")
-    geography = zillow[["ZIP", "Study_Area", "City", "County", "State"]].rename(columns={
-        "ZIP": "zcta", "Study_Area": "study_area", "City": "zillow_city",
-        "County": "zillow_county", "State": "state",
-    })
-    housing = zillow[["ZIP", "ZHVI_Date", "ZHVI"]].rename(columns={
-        "ZIP": "zcta", "ZHVI_Date": "observation_date", "ZHVI": "zhvi",
-    })
+    geography = zillow[["ZIP", "Study_Area", "City", "County", "State"]].rename(
+        columns={
+            "ZIP": "zcta",
+            "Study_Area": "study_area",
+            "City": "zillow_city",
+            "County": "zillow_county",
+            "State": "state",
+        }
+    )
+    housing = zillow[["ZIP", "ZHVI_Date", "ZHVI"]].rename(
+        columns={
+            "ZIP": "zcta",
+            "ZHVI_Date": "observation_date",
+            "ZHVI": "zhvi",
+        }
+    )
     demographics = acs[list(ACS_DB_NAMES)].rename(columns=ACS_DB_NAMES)
     demographics.insert(1, "acs_year", ACS_YEAR)
     demographics["population"] = demographics["population"].astype("Int64")
