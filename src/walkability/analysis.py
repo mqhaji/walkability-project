@@ -39,10 +39,10 @@ def fit_ols(frame: pd.DataFrame, predictors: list[str], *, city_indicators: bool
     """Fit the notebook's full-rank OLS specification with HC3 errors."""
     design = frame[predictors].astype(float).copy()
     if city_indicators:
-        design = pd.concat([
-            design,
-            pd.get_dummies(frame["Study_Area"], prefix="Study_Area", drop_first=True, dtype=float),
-        ], axis=1)
+        indicators = pd.get_dummies(
+            frame["Study_Area"], prefix="Study_Area", drop_first=True, dtype=float
+        )
+        design = pd.concat([design, indicators], axis=1)
     design = sm.add_constant(design, has_constant="add")
     if np.linalg.matrix_rank(design.to_numpy()) < design.shape[1]:
         raise ValueError("OLS design is rank deficient; check the input sample.")
@@ -78,7 +78,11 @@ def run_analysis(features: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
     for city, subset in frame.groupby("Study_Area", sort=True):
         models[city] = fit_ols(subset, PREDICTORS)
     coefficients = pd.concat({
-        name: pd.DataFrame({"coefficient": m.params, "HC3_standard_error": m.bse, "p_value": m.pvalues})
+        name: pd.DataFrame({
+            "coefficient": m.params,
+            "HC3_standard_error": m.bse,
+            "p_value": m.pvalues,
+        })
         for name, m in models.items()
     }, names=["model", "term"])
     model_summary = pd.DataFrame.from_dict({
@@ -97,7 +101,11 @@ def run_analysis(features: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
     for k in range(2, 7):
         candidate = KMeans(n_clusters=k, random_state=42, n_init=50)
         labels = candidate.fit_predict(scaled)
-        quality.append({"k": k, "inertia": candidate.inertia_, "silhouette": silhouette_score(scaled, labels)})
+        quality.append({
+            "k": k,
+            "inertia": candidate.inertia_,
+            "silhouette": silhouette_score(scaled, labels),
+        })
     model = KMeans(n_clusters=3, random_state=42, n_init=50)
     reference = model.fit_predict(scaled)
     rng = np.random.default_rng(42)
@@ -106,11 +114,17 @@ def run_analysis(features: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
         indices = rng.choice(len(frame), size=len(frame), replace=True)
         if len(np.unique(indices)) <= 3:
             continue
-        labels = KMeans(n_clusters=3, random_state=1_000 + iteration, n_init=20).fit_predict(scaled[indices])
-        assignments = pd.DataFrame({"Index": indices, "Label": labels}).groupby("Index")["Label"].agg(
-            lambda values: values.mode().iat[0]
+        labels = KMeans(
+            n_clusters=3, random_state=1_000 + iteration, n_init=20
+        ).fit_predict(scaled[indices])
+        assignments = (
+            pd.DataFrame({"Index": indices, "Label": labels})
+            .groupby("Index")["Label"]
+            .agg(lambda values: values.mode().iat[0])
         )
-        stability.append(adjusted_rand_score(reference[assignments.index.to_numpy()], assignments.to_numpy()))
+        stability.append(adjusted_rand_score(
+            reference[assignments.index.to_numpy()], assignments.to_numpy()
+        ))
 
     x = frame[PREDICTORS].astype(float)
     y = frame["Log_ZHVI"].to_numpy()
@@ -154,9 +168,14 @@ def run_analysis(features: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
         "cluster_quality": pd.DataFrame(quality),
         "cluster_stability": pd.Series(stability, name="ARI"),
         "cluster_assignments": frame[["Study_Area", "ZIP"]].assign(Cluster=reference),
-        "cluster_centroids": pd.DataFrame(scaler.inverse_transform(model.cluster_centers_), columns=CLUSTER_FEATURES),
+        "cluster_centroids": pd.DataFrame(
+            scaler.inverse_transform(model.cluster_centers_), columns=CLUSTER_FEATURES
+        ),
         "lasso_folds": pd.DataFrame(folds),
-        "lasso_coefficients": pd.Series(final.best_estimator_.named_steps["lasso"].coef_, index=PREDICTORS, name="coefficient"),
+        "lasso_coefficients": pd.Series(
+            final.best_estimator_.named_steps["lasso"].coef_,
+            index=PREDICTORS, name="coefficient",
+        ),
         "predictions": prediction_rows,
     }
 
