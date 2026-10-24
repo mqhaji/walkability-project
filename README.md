@@ -4,7 +4,7 @@ A ZIP/ZCTA-level comparison of whether the apparent relationship between commute
 
 > **Project status:** This repository preserves the current validated version of an inherited exploratory analysis. Data definitions and the research framing were refined during a technical audit and after preliminary results had been examined. The findings are therefore descriptive and diagnostic rather than a preregistered confirmatory test.
 
-> **Main workflow:** Python loads the source data into PostgreSQL; SQL views prepare the features; a Python command runs the models and saves tables and figures. No notebook is needed. Both notebooks remain references. Offline tests are included; database CI and Power BI are still planned.
+> **Main workflow:** Python loads the source data into PostgreSQL; SQL views prepare the features; a Python command runs the models and saves tables and figures. No notebook is needed. Both notebooks remain references. Offline and database tests are included; GitHub Actions awaits its first remote run. Power BI is still planned.
 
 ## Research Objective
 
@@ -238,7 +238,8 @@ database. The two unavailable home values remain SQL `NULL`.
 
 The existing Python environment was restored on Python 3.13.15; dependency and
 scientific-library import checks pass. The reference notebook remains unchanged.
-These are local verification checks, **not yet a committed pytest suite or CI**.
+These original study-data checks were local. Synthetic automated database tests
+are described in the testing section below.
 ### Stage 2: SQL analytics integration
 
 `sql/views.sql` defines two ordinary views:
@@ -281,7 +282,8 @@ something retuned during migration.
 Fault injection of invalid view SQL verified that earlier source upserts roll
 back completely. CLI isolation checks verified that `--views-only` does not call
 extraction or read Census configuration, and conflicting modes fail before IO.
-These are local checks, **not yet a committed automated test suite or CI**.
+These study-data checks were local; the automated suite separately tests
+database behavior using invented records.
 
 ## Run the Models Without a Notebook
 
@@ -308,7 +310,8 @@ Run the offline tests with `python -m unittest discover -s tests -v`.
 They check model setup, safe errors, protection of existing outputs, diagnostic
 chart rendering, map coverage and shared scales, and cleanup after a failed
 save. They use small invented inputs and need no database, source files or API
-keys. The full numerical comparison was a separate local check. CI is pending.
+keys. The full numerical comparison was a separate local check. See the database
+testing section for CI setup and its verification status.
 
 The command also saves the correlation heatmap, KMeans diagnostic panels,
 cluster-profile scatterplot and Lasso coefficient chart. To include the three
@@ -426,3 +429,25 @@ It is not an official Walk Score or a direct measurement of the built environmen
 The primary outcome is the natural logarithm of ZIP-level ZHVI. The main OLS specification includes log median income, commute time, renter share, college-graduate share, log population, and city indicators, with HC3 heteroskedasticity-robust standard errors. An ACS home-value-to-income ratio appears only in a sensitivity model because its numerator overlaps conceptually with ZHVI.
 
 Important limitations include the cross-sectional design, spatial dependence among nearby ZCTAs, different ACS and Zillow observation periods, imperfect municipal-boundary alignment, the use of only three cities, and the commuting proxy's limited representation of the built environment.
+
+## Database Tests and GitHub Actions
+
+Run `python -m unittest discover -s tests -v`. Database tests are skipped unless
+`TEST_DATABASE_DSN` is explicitly set in your terminal. Point it at a dedicated
+disposable PostgreSQL server, never production. The role needs permission to
+create and drop databases. Each test creates a random `walkability_test_*`
+database and registers cleanup to drop only that database. Tests never use
+`.env` or fall back to the study connection.
+
+Invented records test feature formulas, ranking ties, strict median flags,
+missing estimates and facts, historical periods, repeat loading and rollback.
+No downloaded study data or Census key is required.
+
+`.github/workflows/tests.yml` runs the suite on pushes and pull requests using
+Python 3.13 and temporary PostgreSQL 17. Its password is disposable test data,
+not a project credential. The runner needs internet to install dependencies,
+but the tests make no external data requests.
+
+All 22 tests passed locally against a separate temporary PostgreSQL container.
+The first GitHub run remains unverified until this change is pushed. Passing CI
+checks code behavior; it does not reproduce the research from the real inputs.
