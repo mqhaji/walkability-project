@@ -2,6 +2,7 @@
 
 import argparse
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
@@ -21,8 +22,9 @@ from sklearn.model_selection import GridSearchCV, GroupKFold, LeaveOneGroupOut
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from walkability.config import PROJECT_ROOT
+from walkability.config import DATA_DIR, PROJECT_ROOT
 from walkability.database import read_analysis_data
+from walkability.figures import save_diagnostics, save_maps
 
 PREDICTORS = [
     "Walkability_Score", "Log_Median_Income", "Commute_Min",
@@ -33,7 +35,7 @@ CLUSTER_FEATURES = [
 ]
 
 
-def fit_ols(frame, predictors, *, city_indicators=False):
+def fit_ols(frame: pd.DataFrame, predictors: list[str], *, city_indicators: bool = False):
     """Fit the notebook's full-rank OLS specification with HC3 errors."""
     design = frame[predictors].astype(float).copy()
     if city_indicators:
@@ -47,7 +49,7 @@ def fit_ols(frame, predictors, *, city_indicators=False):
     return sm.OLS(frame["Log_ZHVI"], design).fit(cov_type="HC3")
 
 
-def lasso_search(groups):
+def lasso_search(groups: np.ndarray) -> GridSearchCV:
     """Keep scaling inside the city-grouped penalty-selection folds."""
     return GridSearchCV(
         Pipeline([("scale", StandardScaler()), ("lasso", Lasso(max_iter=100_000))]),
@@ -58,8 +60,16 @@ def lasso_search(groups):
     )
 
 
-def run_analysis(features):
-    """Return numerical results; no notebook state or files are used."""
+def run_analysis(features: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
+    """Fit the fixed study models and return named, exportable tables.
+
+    Input uses database.read_analysis_data's feature contract. Rows are sorted
+    by study area and ZIP before fitting. OLS tables use model/term indexes;
+    assignments and predictions carry explicit study-area/ZIP keys. Other
+    frames contain cluster diagnostics or held-out-city metrics. Series hold
+    summary metrics, bootstrap scores and standardized Lasso coefficients.
+    The caller owns file output; the input frame is not modified.
+    """
     frame = features.sort_values(["Study_Area", "ZIP"]).reset_index(drop=True).copy()
     models = {
         "primary": fit_ols(frame, PREDICTORS, city_indicators=True),
@@ -151,39 +161,81 @@ def run_analysis(features):
     }
 
 
-def main():
+class OutputDirectoryNotEmpty(ValueError):
+    """An export would mix new results with existing files."""
+
+
+def prepare_output_directory(directory: Path) -> None:
+    """Check the final destination without creating or replacing it."""
+    if directory.exists() or directory.is_symlink():
+        raise OutputDirectoryNotEmpty("Output destination already exists; choose a new --output-dir.")
+    directory.parent.mkdir(parents=True, exist_ok=True)
+
+
+def export_analysis(features, rankings, audit, results, directory, geometry_file=None):
+    """Write one run into its private staging folder; do not publish it here."""
+    for name, frame in {**results, "city_rankings": rankings, "source_audit": audit}.items():
+        frame.to_csv(directory / f"{name}.csv", index=True)
+    predictions = results["predictions"]
+    fig = Figure(figsize=(7, 7))
+    FigureCanvasAgg(fig)
+    ax = fig.subplots()
+    for city, subset in predictions.groupby("Study_Area", sort=True):
+        ax.scatter(subset["Log_ZHVI"], subset["Predicted_Log_ZHVI"], label=city, alpha=0.75)
+    limits = predictions[["Log_ZHVI", "Predicted_Log_ZHVI"]].to_numpy()
+    ax.plot([limits.min(), limits.max()], [limits.min(), limits.max()], "k--")
+    ax.set(
+        xlabel="Observed log ZHVI",
+        ylabel="Held-out-city predicted log ZHVI",
+        title="Leave-one-city-out housing predictions",
+    )
+    ax.legend()
+    fig.tight_layout()
+    try:
+        fig.savefig(directory / "geographic_transfer.png", dpi=160)
+    finally:
+        fig.clear()
+    save_diagnostics(features, results, directory)
+    if geometry_file is not None:
+        save_maps(features, geometry_file, directory)
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="Run the fixed study models and save tables and a prediction chart.")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "outputs" / "analysis")
+    parser.add_argument("--maps", action="store_true", help="Also save city maps; requires local ZCTA geometry.")
+    parser.add_argument("--geometry-file", type=Path, default=DATA_DIR / "geo" / "tl_2024_us_zcta520.shp")
     args = parser.parse_args()
     try:
+        # Fail before fitting or exporting if this would mix separate runs.
+        prepare_output_directory(args.output_dir)
         features, rankings, audit = read_analysis_data()
         results = run_analysis(features)
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        for name, frame in {**results, "city_rankings": rankings, "source_audit": audit}.items():
-            frame.to_csv(args.output_dir / f"{name}.csv", index=True)
-        predictions = results["predictions"]
-        fig = Figure(figsize=(7, 7))
-        FigureCanvasAgg(fig)
-        ax = fig.subplots()
-        for city, subset in predictions.groupby("Study_Area", sort=True):
-            ax.scatter(subset["Log_ZHVI"], subset["Predicted_Log_ZHVI"], label=city, alpha=0.75)
-        limits = predictions[["Log_ZHVI", "Predicted_Log_ZHVI"]].to_numpy()
-        ax.plot([limits.min(), limits.max()], [limits.min(), limits.max()], "k--")
-        ax.set(
-            xlabel="Observed log ZHVI",
-            ylabel="Held-out-city predicted log ZHVI",
-            title="Leave-one-city-out housing predictions",
-        )
-        ax.legend()
-        fig.tight_layout()
-        fig.savefig(args.output_dir / "geographic_transfer.png", dpi=160)
+        # A sibling directory keeps the final rename on the same filesystem.
+        with TemporaryDirectory(
+            prefix=f".{args.output_dir.name}-incomplete-", dir=args.output_dir.parent
+        ) as temporary:
+            staging = Path(temporary) / "results"
+            staging.mkdir()
+            export_analysis(
+                features, rankings, audit, results, staging,
+                args.geometry_file if args.maps else None,
+            )
+            prepare_output_directory(args.output_dir)
+            staging.rename(args.output_dir)
         print(results["metrics"].to_string())
-        print("Analysis complete. Result tables and prediction chart saved in the output directory.")
+        print("Analysis complete. Result tables and figures saved in the output directory.")
         return 0
     except OSError:
-        print("Could not save all analysis outputs. Check directory permissions and disk space; files may be incomplete.")
+        print("Could not save the analysis. Check directory permissions and disk space; this run was not published.")
         return 1
-    except (ValueError, RuntimeError):
+    except OutputDirectoryNotEmpty:
+        print("Output destination already exists; choose a new --output-dir.")
+        return 1
+    except ValueError:
+        print("Analysis failed. Check the study sample and geometry before retrying.")
+        return 1
+    except RuntimeError:
         print("Analysis failed. Check PostgreSQL setup and the study sample before retrying.")
         return 1
 

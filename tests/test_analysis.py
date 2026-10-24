@@ -1,6 +1,8 @@
 """Small offline checks; run with python -m unittest discover -s tests."""
 
 import io
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
@@ -42,12 +44,62 @@ class AnalysisTests(unittest.TestCase):
 
     def test_database_failure_is_sanitized(self):
         output = io.StringIO()
-        with patch("sys.argv", ["walkability-analyze"]), \
+        with TemporaryDirectory() as directory, \
+                patch("sys.argv", ["walkability-analyze", "--output-dir", str(Path(directory) / "run")]), \
                 patch.object(analysis, "read_analysis_data", side_effect=RuntimeError("private connection details")), \
                 redirect_stdout(output):
             self.assertEqual(analysis.main(), 1)
         self.assertNotIn("private connection details", output.getvalue())
         self.assertIn("PostgreSQL", output.getvalue())
+
+    def test_existing_outputs_are_preserved_before_database_access(self):
+        with TemporaryDirectory() as directory:
+            marker = Path(directory) / "previous.csv"
+            marker.write_text("previous results", encoding="utf-8")
+            with patch("sys.argv", ["walkability-analyze", "--output-dir", directory]), \
+                    patch.object(analysis, "read_analysis_data") as reader, \
+                    redirect_stdout(io.StringIO()):
+                self.assertEqual(analysis.main(), 1)
+                reader.assert_not_called()
+            self.assertEqual(marker.read_text(encoding="utf-8"), "previous results")
+
+    def test_failed_export_removes_only_its_temporary_files(self):
+        def fail_export(features, rankings, audit, results, directory, geometry_file):
+            (directory / "partial.csv").write_text("partial", encoding="utf-8")
+            raise OSError("simulated full disk")
+
+        with TemporaryDirectory() as root:
+            destination = Path(root) / "run"
+            marker = Path(root) / "keep.txt"
+            marker.write_text("keep", encoding="utf-8")
+            with patch("sys.argv", ["walkability-analyze", "--output-dir", str(destination)]), \
+                    patch.object(analysis, "read_analysis_data", return_value=(None, None, None)), \
+                    patch.object(analysis, "run_analysis", return_value={}), \
+                    patch.object(analysis, "export_analysis", side_effect=fail_export), \
+                    redirect_stdout(io.StringIO()):
+                self.assertEqual(analysis.main(), 1)
+            self.assertEqual(list(Path(root).iterdir()), [marker])
+
+    def test_success_publishes_only_completed_results(self):
+        def export(features, rankings, audit, results, directory, geometry_file):
+            self.assertFalse(destination.exists())
+            (directory / "complete.csv").write_text("complete", encoding="utf-8")
+
+        with TemporaryDirectory() as root:
+            destination = Path(root) / "run"
+            with patch("sys.argv", ["walkability-analyze", "--output-dir", str(destination)]), \
+                    patch.object(analysis, "read_analysis_data", return_value=(None, None, None)), \
+                    patch.object(analysis, "run_analysis", return_value={"metrics": pd.Series([1.])}), \
+                    patch.object(analysis, "export_analysis", side_effect=export), \
+                    redirect_stdout(io.StringIO()):
+                self.assertEqual(analysis.main(), 0)
+            self.assertEqual(list(Path(root).iterdir()), [destination])
+            self.assertEqual((destination / "complete.csv").read_text(), "complete")
+
+    def test_empty_existing_destination_is_not_replaced(self):
+        with TemporaryDirectory() as root:
+            with self.assertRaises(analysis.OutputDirectoryNotEmpty):
+                analysis.prepare_output_directory(Path(root))
 
 
 if __name__ == "__main__":

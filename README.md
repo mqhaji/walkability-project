@@ -4,7 +4,7 @@ A ZIP/ZCTA-level comparison of whether the apparent relationship between commute
 
 > **Project status:** This repository preserves the current validated version of an inherited exploratory analysis. Data definitions and the research framing were refined during a technical audit and after preliminary results had been examined. The findings are therefore descriptive and diagnostic rather than a preregistered confirmatory test.
 
-> **Pipeline upgrade:** Python extraction/loading, PostgreSQL analytical views, and the separate [PostgreSQL-backed analysis notebook](notebooks/walkability_analysis_postgres.ipynb) are implemented and locally verified. The original notebook is preserved as a reference. Automated pytest/CI and Power BI remain future work.
+> **Main workflow:** Python loads the source data into PostgreSQL; SQL views prepare the features; a Python command runs the models and saves tables and figures. No notebook is needed. Both notebooks remain references. Offline tests are included; database CI and Power BI are still planned.
 
 ## Research Objective
 
@@ -288,8 +288,8 @@ These are local checks, **not yet a committed automated test suite or CI**.
 Run `python -m walkability.analysis` from the installed project environment.
 This reads the PostgreSQL views, fits the existing OLS, KMeans/bootstrap and
 city-grouped Lasso models, and saves results under `outputs/analysis/`.
-Use `--output-dir` to choose a different destination. Repeating a run replaces
-files with the same names; the output directory is not an archive of past runs.
+The destination must not exist. Use `--output-dir outputs/my-run` for another run;
+the command refuses existing destinations, including empty folders and symlinks.
 
 Exports include model coefficients, cluster diagnostics and assignments,
 held-out-city predictions and errors, SQL rankings, source audit, summary metrics,
@@ -304,17 +304,31 @@ calculations (absolute/relative tolerance `1e-10`). Cluster partitions agree
 exactly. The OLS summary export includes fit statistics and condition numbers;
 the existing numerical cautions still apply.
 
-Run the four small offline tests with `python -m unittest discover -s tests -v`.
-They check rank-deficient OLS inputs, HC3/city indicators, grouped Lasso setup
-and safe database-error messages. They require the installed project packages,
-but no PostgreSQL server, source files or API keys. The full numerical comparison
-was a separate local check, not part of these four tests. CI remains pending.
+Run the offline tests with `python -m unittest discover -s tests -v`.
+They check model setup, safe errors, protection of existing outputs, diagnostic
+chart rendering, map coverage and shared scales, and cleanup after a failed
+save. They use small invented inputs and need no database, source files or API
+keys. The full numerical comparison was a separate local check. CI is pending.
 
-**Remaining presentation work:** the script currently exports the prediction
-chart, not the notebook's complete map and diagnostic figure collection. Keep
-the notebooks as references until those figures and broader parity checks are
-finished. A failed export can leave partial output files; treat a run as complete
-only when the command reports success.
+The command also saves the correlation heatmap, KMeans diagnostic panels,
+cluster-profile scatterplot and Lasso coefficient chart. To include the three
+city maps, run `python -m walkability.analysis --maps`. Map export requires the
+local national ZCTA shapefile; `--geometry-file` can select another copy of the
+same geometry source. Without `--maps`, geometry is not read.
+
+All maps use one shared color scale and require exactly one geometry per
+analytical observation. Local verification matched all **248 observations** and
+produced eight PNG files in total (five statistical figures and three maps).
+The figure inputs and models are unchanged; titles and captions are written for
+standalone images rather than notebook display. The notebooks remain references
+and are not needed to produce these outputs.
+
+Exports are written to a temporary sibling folder and renamed to the requested
+destination only after every table and figure succeeds. Ordinary failures clean
+up that run's temporary files without touching previous results. A forced kill
+or power loss may leave a hidden `.<name>-incomplete-*` folder, not a finished
+result directory. Parent folders may remain empty after a failed run. Do not run
+two processes into the same destination; concurrent publication is not supported.
 
 ## Run the PostgreSQL Analysis Notebook
 
