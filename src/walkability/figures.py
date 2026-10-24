@@ -8,6 +8,10 @@ import pandas as pd
 import seaborn as sns
 
 
+class GeometryInputError(ValueError):
+    """Missing, unreadable or incomplete geometry for the requested maps."""
+
+
 def _figure(size: tuple[float, float]) -> Figure:
     figure = Figure(figsize=size)
     FigureCanvasAgg(figure)
@@ -89,18 +93,24 @@ def save_maps(features: pd.DataFrame, geometry_path: Path, output_dir: Path) -> 
     """Require one geometry per observation and use a shared color range."""
     import geopandas as gpd
 
-    geometry = gpd.read_file(geometry_path)
+    try:
+        geometry = gpd.read_file(geometry_path)
+    except (OSError, RuntimeError, ValueError):
+        raise GeometryInputError(
+            "Could not read ZCTA geometry. Check --geometry-file and keep the "
+            "shapefile and its sidecar files together; see README.md."
+        ) from None
     if "ZCTA5CE20" not in geometry:
-        raise ValueError("Geometry must contain the ZCTA5CE20 field.")
+        raise GeometryInputError("Geometry must contain the ZCTA5CE20 field.")
     geometry["ZIP"] = geometry["ZCTA5CE20"].astype("string").str.zfill(5)
     geometry = geometry.loc[geometry["ZIP"].isin(features["ZIP"]), ["ZIP", "geometry"]]
     if geometry["ZIP"].duplicated().any() or set(geometry["ZIP"]) != set(features["ZIP"]):
-        raise ValueError("Each analytical ZCTA must match exactly one geometry.")
+        raise GeometryInputError("Each analytical ZCTA must match exactly one geometry.")
     mapped = geometry.merge(features, on="ZIP", validate="one_to_one")
     if mapped.geometry.isna().any() or mapped.geometry.is_empty.any():
-        raise ValueError("Analytical ZCTAs must have nonempty geometry.")
+        raise GeometryInputError("Analytical ZCTAs must have nonempty geometry.")
     if not mapped.geometry.is_valid.all():
-        raise ValueError("Analytical ZCTAs contain invalid geometry; check the source file.")
+        raise GeometryInputError("Analytical ZCTAs contain invalid geometry; check the source file.")
     low, high = features["Walkability_Score"].agg(["min", "max"])
     cities = [
         ("Chicago", "chicago"),
@@ -110,7 +120,7 @@ def save_maps(features: pd.DataFrame, geometry_path: Path, output_dir: Path) -> 
     for city, slug in cities:
         subset = mapped.loc[mapped["Study_Area"].eq(city)]
         if subset.empty:
-            raise ValueError("A study area has no mapped observations.")
+            raise GeometryInputError("A study area has no mapped observations.")
         figure = _figure((8, 8))
         ax = figure.subplots()
         subset.plot(

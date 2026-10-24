@@ -51,6 +51,18 @@ class FigureTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "exactly one geometry"):
                 save_maps(self.features, Path("unused.shp"), Path("unused"))
 
+    def test_missing_or_corrupt_file_has_safe_geometry_error(self):
+        with TemporaryDirectory() as directory:
+            for name in ["missing.shp", "corrupt.shp"]:
+                path = Path(directory) / name
+                if name == "corrupt.shp":
+                    path.write_text("not a shapefile", encoding="utf-8")
+                with self.subTest(name=name):
+                    with self.assertRaisesRegex(ValueError, "Could not read ZCTA geometry") as caught:
+                        save_maps(self.features, path, Path(directory))
+                    self.assertNotIn(directory, str(caught.exception))
+                    self.assertTrue(caught.exception.__suppress_context__)
+
     def test_empty_geometry_is_rejected(self):
         self.geometry.loc[0, "geometry"] = None
         with patch("geopandas.read_file", return_value=self.geometry):

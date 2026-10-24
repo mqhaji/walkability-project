@@ -2,7 +2,7 @@
 
 The reference notebook's city filters and source definitions are preserved.
 Missing ACS estimates remain missing in the source tables; analytical sample
-selection and derived features will belong to the SQL layer in Stage 2.
+selection and derived features belong to the SQL layer.
 """
 
 import numpy as np
@@ -55,6 +55,8 @@ def require_unique_keys(frame: pd.DataFrame, label: str) -> None:
 
 def _numeric(values: pd.Series, label: str) -> pd.Series:
     """Reject malformed and infinite values while retaining genuine missing data."""
+    if values.map(lambda value: isinstance(value, (bool, np.bool_))).any():
+        raise ValueError(f"{label}: Boolean values are not numeric estimates.")
     try:
         result = pd.to_numeric(values, errors="raise")
     except (ValueError, TypeError):

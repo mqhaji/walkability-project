@@ -24,7 +24,8 @@ from sklearn.preprocessing import StandardScaler
 
 from walkability.config import DATA_DIR, PROJECT_ROOT
 from walkability.database import read_analysis_data
-from walkability.figures import save_diagnostics, save_maps
+from walkability.figures import GeometryInputError, save_diagnostics, save_maps
+from walkability.prepare import STUDY_AREAS
 
 PREDICTORS = [
     "Walkability_Score", "Log_Median_Income", "Commute_Min",
@@ -33,6 +34,10 @@ PREDICTORS = [
 CLUSTER_FEATURES = [
     "Walkability_Score", "Income_to_Rent", "Rent_Share", "College_Grad_Share",
 ]
+
+
+class StudySampleError(ValueError):
+    """The analytical sample cannot support this three-city workflow."""
 
 
 def fit_ols(frame: pd.DataFrame, predictors: list[str], *, city_indicators: bool = False):
@@ -70,6 +75,14 @@ def run_analysis(features: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
     summary metrics, bootstrap scores and standardized Lasso coefficients.
     The caller owns file output; the input frame is not modified.
     """
+    if (
+        features["Study_Area"].isna().any()
+        or set(features["Study_Area"]) != STUDY_AREAS
+    ):
+        raise StudySampleError(
+            "Analysis requires all three study areas: Chicago, New York City and "
+            "Washington DC, with no other or missing labels. Check sample coverage."
+        )
     frame = features.sort_values(["Study_Area", "ZIP"]).reset_index(drop=True).copy()
     models = {
         "primary": fit_ols(frame, PREDICTORS, city_indicators=True),
@@ -250,6 +263,10 @@ def main() -> int:
         return 1
     except OutputDirectoryNotEmpty:
         print("Output destination already exists; choose a new --output-dir.")
+        return 1
+    except (StudySampleError, GeometryInputError) as error:
+        # These application errors contain only fixed, safe guidance.
+        print(str(error))
         return 1
     except ValueError:
         print("Analysis failed. Check the study sample and geometry before retrying.")

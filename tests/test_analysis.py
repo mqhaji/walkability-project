@@ -16,6 +16,20 @@ from walkability import analysis
 
 
 class AnalysisTests(unittest.TestCase):
+    def test_study_area_check_happens_before_any_fit(self):
+        for cities in [
+            ["Chicago", "New York City"],
+            ["Chicago", "New York City", "Washington DC", "Other"],
+            ["Chicago", "New York City", "Washington DC", None],
+            [],
+        ]:
+            with self.subTest(cities=cities):
+                frame = pd.DataFrame({"Study_Area": cities})
+                with patch.object(analysis, "fit_ols", side_effect=AssertionError("fit started")) as fit:
+                    with self.assertRaisesRegex(ValueError, "all three study areas"):
+                        analysis.run_analysis(frame)
+                    fit.assert_not_called()
+
     def test_ols_rejects_duplicate_predictors(self):
         frame = pd.DataFrame({"x": [1., 2., 3.], "copy": [1., 2., 3.], "Log_ZHVI": [2., 3., 4.]})
         with self.assertRaisesRegex(ValueError, "rank deficient"):
@@ -100,6 +114,88 @@ class AnalysisTests(unittest.TestCase):
         with TemporaryDirectory() as root:
             with self.assertRaises(analysis.OutputDirectoryNotEmpty):
                 analysis.prepare_output_directory(Path(root))
+
+    def test_missing_city_cli_error_is_clear_and_stops_before_fitting(self):
+        frame = pd.DataFrame({"Study_Area": ["Chicago", "New York City"]})
+        output = io.StringIO()
+        with TemporaryDirectory() as root:
+            destination = Path(root) / "run"
+            with (
+                patch("sys.argv", ["analyze", "--output-dir", str(destination)]),
+                patch.object(analysis, "read_analysis_data", return_value=(frame, None, None)),
+                patch.object(analysis, "fit_ols", side_effect=AssertionError("fit started")),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(analysis.main(), 1)
+            self.assertEqual(list(Path(root).iterdir()), [])
+        self.assertIn("all three study areas", output.getvalue())
+        self.assertNotIn("PostgreSQL", output.getvalue())
+
+    def export_results(self):
+        return {
+            "metrics": pd.Series([3.], index=["rows"], name="value"),
+            "predictions": pd.DataFrame({
+                "Study_Area": ["Chicago", "New York City", "Washington DC"],
+                "Log_ZHVI": [12., 13., 14.],
+                "Predicted_Log_ZHVI": [12.1, 13.1, 14.1],
+            }),
+        }
+
+    def test_geometry_cli_failures_are_safe_and_not_published(self):
+        for kind in ["missing", "corrupt"]:
+            with self.subTest(kind=kind), TemporaryDirectory() as root:
+                geometry = Path(root) / f"{kind}.shp"
+                if kind == "corrupt":
+                    geometry.write_text("not geometry", encoding="utf-8")
+                destination = Path(root) / "run"
+                output = io.StringIO()
+                with (
+                    patch("sys.argv", ["analyze", "--maps", "--geometry-file", str(geometry),
+                                       "--output-dir", str(destination)]),
+                    patch.object(analysis, "read_analysis_data", return_value=(pd.DataFrame(), pd.DataFrame(), pd.DataFrame())),
+                    patch.object(analysis, "run_analysis", return_value=self.export_results()),
+                    patch.object(analysis, "save_diagnostics"),
+                    redirect_stdout(output),
+                ):
+                    self.assertEqual(analysis.main(), 1)
+                self.assertIn("Could not read ZCTA geometry", output.getvalue())
+                self.assertNotIn("PostgreSQL", output.getvalue())
+                self.assertNotIn(root, output.getvalue())
+                self.assertFalse(destination.exists())
+                self.assertEqual(list(Path(root).iterdir()), [geometry] if kind == "corrupt" else [])
+
+    def test_plot_save_failure_remains_an_output_error(self):
+        output = io.StringIO()
+        with TemporaryDirectory() as root:
+            destination = Path(root) / "run"
+            with (
+                patch("sys.argv", ["analyze", "--maps", "--output-dir", str(destination)]),
+                patch.object(analysis, "read_analysis_data", return_value=(pd.DataFrame(), pd.DataFrame(), pd.DataFrame())),
+                patch.object(analysis, "run_analysis", return_value=self.export_results()),
+                patch.object(analysis.Figure, "savefig", side_effect=OSError("private failed path")),
+                redirect_stdout(output),
+            ):
+                self.assertEqual(analysis.main(), 1)
+            self.assertEqual(list(Path(root).iterdir()), [])
+        self.assertIn("Could not save the analysis", output.getvalue())
+        self.assertNotIn("private failed path", output.getvalue())
+        self.assertNotIn("geometry", output.getvalue())
+
+    def test_no_map_run_never_reads_geometry(self):
+        with TemporaryDirectory() as root:
+            destination = Path(root) / "run"
+            with (
+                patch("sys.argv", ["analyze", "--geometry-file", "absent.shp",
+                                   "--output-dir", str(destination)]),
+                patch.object(analysis, "read_analysis_data", return_value=(pd.DataFrame(), pd.DataFrame(), pd.DataFrame())),
+                patch.object(analysis, "run_analysis", return_value=self.export_results()),
+                patch.object(analysis, "save_diagnostics"),
+                patch.object(analysis, "save_maps", side_effect=AssertionError("geometry read")) as maps,
+                redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(analysis.main(), 0)
+                maps.assert_not_called()
+            self.assertTrue((destination / "geographic_transfer.png").is_file())
 
 
 if __name__ == "__main__":

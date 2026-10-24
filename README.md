@@ -149,6 +149,8 @@ files. Without an explicit cached extract, validation still calls Census.
 Keys remain five-digit text. Constraints enforce valid values and foreign keys.
 Unavailable estimates remain NULL, never zero. Source percentages stay in 0–100
 units; SQL converts them to shares. Double precision avoids extra currency rounding.
+Boolean values such as `True` and `False` are rejected in numeric source fields,
+not converted into estimates of 1 and 0.
 
 Tables, upserts, coverage checks and view setup share one transaction. Failures
 roll everything back. Repeated loads update matching keys without duplicates;
@@ -177,6 +179,16 @@ Add `--maps` for all three city maps; `--geometry-file` can select another copy
 of the same source geometry. Without `--maps`, geometry is not read.
 The installed aliases are `walkability-load` and `walkability-analyze`.
 
+Model fitting requires eligible observations from all three study areas. If a
+city is missing after filtering, analysis stops before fitting rather than
+silently running a different study. Check source coverage and unavailable
+estimates; do not remove the check just to obtain results. The SQL reader still
+supports smaller samples for inspection and tests.
+
+If maps cannot be read, the error points to `--geometry-file` and the required
+shapefile sidecars. Geometry problems are reported separately from output-saving
+failures. Raw file-reader and database exception details are not printed.
+
 The reader fetches features, rankings and a source audit in one read-only,
 repeatable-read snapshot. It checks keys, periods, finite analytical values and
 matching membership, then closes the connection before modeling. Analysis makes
@@ -199,8 +211,11 @@ Concurrent runs into the same destination are not supported.
 ## Tests and Verification
 
 Run `python -m unittest discover -s tests -v` for the offline tests. They check
-model setup, output protection and cleanup, figure rendering and map coverage
-using invented inputs. No database or downloaded data is needed.
+source parsing and preparation, the three-city requirement, model setup, safe
+errors, output cleanup, figure rendering and map coverage. Invented records and
+mocked Census responses cover ZIP formatting, city filters, missing-value codes,
+bicycle-share calculations and malformed API responses. No database, API key,
+external data request or downloaded study data is needed for these tests.
 
 Eight PostgreSQL tests are skipped unless `TEST_DATABASE_DSN` is explicitly set.
 Point it at a **dedicated disposable server**, never production. The role must
@@ -215,7 +230,10 @@ Its password is a disposable test value. The runner needs internet to install
 dependencies, but tests make no external data requests. The first hosted run
 [passed for commit `164445a`](https://github.com/mqhaji/walkability-project/actions/runs/40127631604).
 
-Local checks passed all **22 tests**. Separately, real-input SQL features matched
+Local checks passed all **42 tests** (34 offline and eight PostgreSQL tests).
+The new tests have not yet been verified on GitHub; check this commit's workflow
+after pushing. The earlier passing run above does not verify these new changes.
+Separately, real-input SQL features matched
 the reference's 35-column contract within `1e-12`. Script regression estimates,
 HC3 errors, all 248 transfer predictions, bootstrap scores and Lasso coefficients
 matched notebook calculations within `1e-10`. Cluster partitions agreed exactly
