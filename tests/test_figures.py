@@ -10,7 +10,13 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import box
 
-from walkability.figures import _figure, _save, save_diagnostics, save_maps
+from walkability.figures import (
+    _figure,
+    _save,
+    save_city_relationships,
+    save_diagnostics,
+    save_maps,
+)
 
 
 class FigureTests(unittest.TestCase):
@@ -128,11 +134,62 @@ class FigureTests(unittest.TestCase):
                     "cluster_diagnostics.png",
                     "cluster_profiles.png",
                     "lasso_coefficients.png",
+                    "city_relationships.png",
                 },
             )
             for image in Path(directory).glob("*.png"):
                 self.assertTrue(image.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"))
         pd.testing.assert_frame_equal(features, original)
+
+    def test_city_chart_keeps_observations_correlations_and_shared_scales(self):
+        features = pd.DataFrame(
+            {
+                "Study_Area": ["Chicago"] * 3
+                + ["New York City"] * 3
+                + ["Washington DC"] * 3,
+                "Walkability_Score": [0.1, 0.2, 0.3] * 3,
+                "Log_ZHVI": [12.0, 12.5, 13.0, 14.0, 13.5, 13.0, 12.0, 13.0, 12.0],
+            }
+        )
+        original = features.copy(deep=True)
+
+        def inspect(figure, destination, caption):
+            axes = figure.axes
+            self.assertEqual(len(axes), 4)
+            self.assertEqual(
+                [
+                    sum(len(points.get_offsets()) for points in ax.collections)
+                    for ax in axes
+                ],
+                [9, 3, 3, 3],
+            )
+            for ax, expected in zip(axes[1:], ["1.00", "-1.00", "0.00"]):
+                self.assertIn(f"r = {expected}", ax.get_title())
+            for ax in axes:
+                self.assertEqual(ax.get_xlim(), axes[0].get_xlim())
+                self.assertEqual(ax.get_ylim(), axes[0].get_ylim())
+            self.assertEqual(destination.name, "city_relationships.png")
+            _save(figure, destination, caption)
+
+        with (
+            TemporaryDirectory() as directory,
+            patch("walkability.figures._save", side_effect=inspect),
+        ):
+            save_city_relationships(features, Path(directory))
+            self.assertTrue((Path(directory) / "city_relationships.png").is_file())
+        pd.testing.assert_frame_equal(features, original)
+
+    def test_city_chart_handles_undefined_correlations(self):
+        features = self.features.assign(Log_ZHVI=12.0)
+        with patch("walkability.figures._save") as save:
+            save_city_relationships(features, Path("unused"))
+        figure = save.call_args.args[0]
+        try:
+            self.assertTrue(
+                all("r not available" in ax.get_title() for ax in figure.axes)
+            )
+        finally:
+            figure.clear()
 
     def test_incomplete_clusters_fail_before_writing_charts(self):
         features, results = self.diagnostic_fixture()

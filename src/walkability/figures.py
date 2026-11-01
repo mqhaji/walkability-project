@@ -27,12 +27,65 @@ def _save(figure: Figure, destination: Path, caption: str) -> None:
         figure.clear()
 
 
+def save_city_relationships(features: pd.DataFrame, output_dir: Path) -> None:
+    """Compare the same score/log-value observations together and by city.
+
+    Panels share both axis scales. Pearson correlations describe the plotted
+    observations; no regression lines or additional models are fitted.
+    """
+    colors = {
+        "Chicago": "#0072B2",
+        "New York City": "#D55E00",
+        "Washington DC": "#009E73",
+    }
+    figure = _figure((10, 8))
+    axes = figure.subplots(2, 2, sharex=True, sharey=True)
+    panels = [("All three cities", features)] + [
+        (city, features.loc[features["Study_Area"].eq(city)]) for city in colors
+    ]
+    for ax, (title, observations) in zip(axes.flat, panels):
+        for city, group in observations.groupby("Study_Area", sort=True):
+            ax.scatter(
+                group["Walkability_Score"],
+                group["Log_ZHVI"],
+                color=colors[city],
+                label=city.replace("Washington DC", "Washington, DC"),
+                s=23,
+                alpha=0.7,
+                edgecolors="none",
+            )
+        correlation = "r not available"
+        if (
+            len(observations) >= 2
+            and observations["Walkability_Score"].nunique() > 1
+            and observations["Log_ZHVI"].nunique() > 1
+        ):
+            value = observations["Walkability_Score"].corr(observations["Log_ZHVI"])
+            correlation = f"r = {value:.2f}"
+        label = title.replace("Washington DC", "Washington, DC")
+        ax.set_title(f"{label} | n = {len(observations)} | {correlation}", fontsize=11)
+        ax.grid(alpha=0.18)
+        ax.set_axisbelow(True)
+    axes[0, 0].legend(fontsize=8, loc="lower right", frameon=False)
+    for ax in axes[-1]:
+        ax.set_xlabel("Commute-mode walkability score")
+    for ax in axes[:, 0]:
+        ax.set_ylabel("Natural log of ZHVI")
+    figure.suptitle("The pooled relationship does not hold in every city", fontsize=15)
+    _save(
+        figure,
+        output_dir / "city_relationships.png",
+        "Each point is one ZIP/ZCTA; all panels use the same scales.\n"
+        "r is the Pearson correlation, not an adjusted or causal effect.",
+    )
+
+
 def save_diagnostics(
     features: pd.DataFrame,
     results: dict[str, pd.DataFrame | pd.Series],
     output_dir: Path,
 ) -> None:
-    """Save four charts from run_analysis results without refitting models.
+    """Save five charts from existing features/results without refitting models.
 
     The caller supplies an existing output directory. Cluster assignments must
     match the feature keys exactly; missing rows must not disappear in a plot.
@@ -128,6 +181,7 @@ def save_diagnostics(
         output_dir / "lasso_coefficients.png",
         "Full-sample coefficients describe the fitted model; held-out-city predictions measure transfer.",
     )
+    save_city_relationships(features, output_dir)
 
 
 def save_maps(features: pd.DataFrame, geometry_path: Path, output_dir: Path) -> int:

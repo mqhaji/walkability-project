@@ -26,6 +26,31 @@ The relationship differs by city and changes with the controls included in the
 model. A positive pooled correlation alone is not evidence of a universal
 walkability premium.
 
+### The relationship changes when cities are separated
+
+![Walkability score against log housing value, shown for all 248 observations together and separately for each city.](docs/figures/city_relationships.png)
+
+The pooled correlation is **0.39**, but it is weak in Chicago (**0.11**) and
+New York City (**0.07**) and negative in Washington, DC (**−0.54**). All four
+panels use the same axes. Each point is one ZIP/ZCTA; the correlations describe
+these observations without adjusting for income or other controls.
+
+### A good fit in the observed cities does not guarantee transfer
+
+![Observed versus predicted log housing value for 248 observations, with each prediction made while that observation's city was excluded from training.](docs/figures/geographic_transfer.png)
+
+Each prediction comes from a model trained on the other two cities. The dashed
+line marks a perfect prediction; points far from it show large errors. Overall
+leave-one-city-out **R² is −1.879**, worse than the overall-mean benchmark.
+Errors are measured in log housing-value units, not dollars. The final model
+fitted to all three cities is not used for these transfer predictions.
+
+Both charts use the same **248-observation** sample: March 2025 Zillow ZHVI and
+2022 ACS five-year estimates. They show associations, not causal effects.
+[Figure sources and regeneration instructions](docs/figures/README.md) explain
+how these public images were produced. Maps and other diagnostics remain
+available from the analysis command rather than crowding the project page.
+
 ### What is measured?
 
 - **ZHVI:** Zillow Home Value Index, an estimate of typical home value. The
@@ -196,10 +221,11 @@ no Census requests and does not read either notebook or source CSVs.
 
 Exports include OLS coefficients and fit diagnostics, cluster assignments and
 stability scores, city-held-out predictions and errors, Lasso coefficients, SQL
-rankings, source audit and summary metrics. Five statistical images are saved:
-correlations, clustering diagnostics, cluster profiles, Lasso coefficients and
-geographic transfer. Optional maps bring the total to **eight PNGs**. All maps
-use the same color range and require one geometry per observation.
+rankings, source audit and summary metrics. Six statistical images are saved:
+pooled/within-city relationships, correlations, clustering diagnostics, cluster
+profiles, Lasso coefficients and geographic transfer. Optional maps bring the
+total to **nine PNGs**. All maps use the same color range and require one
+geometry per observation.
 
 **Output safety:** the destination must not exist, even as an empty folder or
 symlink. Exports go into a temporary sibling folder and are published by rename
@@ -248,9 +274,11 @@ Its password is a disposable test value. The runner needs internet to install
 dependencies, but tests make no external data requests. The first hosted run
 [passed for commit `164445a`](https://github.com/mqhaji/walkability-project/actions/runs/40127631604).
 
-Local checks passed all **42 tests** (34 offline and eight PostgreSQL tests).
-The new tests have not yet been verified on GitHub; check this commit's workflow
-after pushing. The earlier passing run above does not verify these new changes.
+The input checks and Ruff setup
+[passed on GitHub for `30a3e2a`](https://github.com/mqhaji/walkability-project/actions/runs/40132065738).
+Local checks for the chart changes passed all **44 tests** (36 offline and eight
+PostgreSQL tests). The chart changes still need their own hosted run after
+pushing; the earlier run does not verify an uncommitted change.
 Separately, real-input SQL features matched
 the reference's 35-column contract within `1e-12`. Script regression estimates,
 HC3 errors, all 248 transfer predictions, bootstrap scores and Lasso coefficients
@@ -290,6 +318,7 @@ steps, not reasons to tune away the current negative transfer result.
 | `.github/workflows/tests.yml` | Automated test workflow |
 | `compose.yaml` | Local PostgreSQL service |
 | `data/README.md` | Local input directory guide |
+| `docs/figures/` | Selected public results and regeneration notes |
 | `outputs/` | Generated results, ignored by Git |
 
 ### Reference notebooks
