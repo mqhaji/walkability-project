@@ -8,9 +8,9 @@ within cities, and models trained in two cities transfer poorly to the third.
 These are associations, not evidence that walkability causes housing values to
 rise or fall.
 
-This is an inherited exploratory project. Data definitions and research framing
-were refined after preliminary results had been examined; it is not a
-preregistered confirmatory study.
+This project builds on an earlier exploratory analysis. The data definitions
+and research question were refined after early results were reviewed, rather
+than fixed before the analysis began.
 
 ## Results and Study Scope
 
@@ -21,6 +21,24 @@ preregistered confirmatory study.
 | City-controlled OLS proxy coefficient | −1.9095; HC3 p≈0.001; R²≈0.783 |
 | Leave-one-city-out Lasso | Overall R²≈−1.879: worse than the overall-mean benchmark |
 | Sample-based walkable/affordable comparison | 51 of 248 observations |
+
+**How to read these results:**
+
+- **Correlation** describes how two measures move together, from −1 to +1.
+  “Pooled” means all three cities are combined.
+- **OLS (ordinary least squares)** estimates the relationship while accounting
+  for the included controls and differences between cities. The coefficient
+  implies about **1.89% lower estimated housing value for a 0.01 higher proxy
+  score**, holding those factors constant. This is not a causal effect.
+- **HC3** is the method used to calculate standard errors when the spread of
+  model errors may vary. The **p-value** measures how incompatible the result
+  is with a zero coefficient under the model's assumptions; it does not measure
+  the size or practical importance of the relationship.
+- **R²** compares squared errors with an outcome-mean benchmark. The OLS value
+  describes fit to the observed sample. The Lasso value measures predictions
+  for cities left out of training; its negative value means those predictions
+  were worse than the overall-mean benchmark. These are different model setups
+  and evaluation tasks, not a like-for-like model ranking.
 
 The relationship differs by city and changes with the controls included in the
 model. A positive pooled correlation alone is not evidence of a universal
@@ -35,7 +53,7 @@ New York City (**0.07**) and negative in Washington, DC (**−0.54**). All four
 panels use the same axes. Each point is one ZIP/ZCTA; the correlations describe
 these observations without adjusting for income or other controls.
 
-### A good fit in the observed cities does not guarantee transfer
+### Models trained in two cities predict the third poorly
 
 ![Observed versus predicted log housing value for 248 observations, with each prediction made while that observation's city was excluded from training.](docs/figures/geographic_transfer.png)
 
