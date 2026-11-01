@@ -1,4 +1,4 @@
-"""Pinned source periods, repository paths, and local environment settings."""
+"""Study dates, local file paths and connection settings."""
 
 import os
 from datetime import date
@@ -36,10 +36,10 @@ DETAILED_VARIABLES = {
 
 
 def env_value(name: str, default: str | None = None) -> str | None:
-    """Prefer the process environment, then the ignored repository .env file.
+    """Read an environment variable first, then the repository's ignored .env.
 
-    Supports the project's simple KEY=value format with optional outer quotes;
-    shell expansion and inline comments are deliberately not supported.
+    Accept simple KEY=value lines with optional quotes around the value.
+    Do not expand shell variables or read comments after values.
     """
     value = os.getenv(name)
     if value:
@@ -54,7 +54,7 @@ def env_value(name: str, default: str | None = None) -> str | None:
 
 
 def database_settings() -> dict[str, str]:
-    """Connection parameters, never printed or included in an error message."""
+    """Read database connection settings without printing their values."""
     password = env_value("POSTGRES_PASSWORD")
     if not password:
         raise ValueError("Set POSTGRES_PASSWORD in .env before loading PostgreSQL.")

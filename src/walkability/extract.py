@@ -1,4 +1,4 @@
-"""Read manual Zillow inputs and retrieve the two required Census tables."""
+"""Read the downloaded Zillow CSV and request the two required Census tables."""
 
 from pathlib import Path
 
@@ -14,7 +14,7 @@ from walkability.config import (
 
 
 def read_zillow(file_path: Path) -> pd.DataFrame:
-    """Read only location columns and the pinned month, preserving ZIP strings."""
+    """Read location columns and the chosen month, keeping ZIPs as text."""
     required = ["RegionName", "City", "CountyName", "State", ZHVI_DATE.isoformat()]
     if not file_path.is_file():
         raise FileNotFoundError("Missing Zillow source CSV; see README.md for setup.")
@@ -28,7 +28,7 @@ def read_zillow(file_path: Path) -> pd.DataFrame:
 def _fetch_table(
     endpoint: str, variables: dict[str, str], api_key: str
 ) -> pd.DataFrame:
-    """Fetch a Census row-array response without leaking a keyed URL on failure."""
+    """Read Census response rows without exposing the API key in an error."""
     try:
         response = requests.get(
             endpoint,
@@ -66,7 +66,7 @@ def _fetch_table(
 
 
 def fetch_acs(api_key: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Download national ZCTA tables once; preparation filters to the study ZIPs."""
+    """Request both national tables; preparation keeps only the study ZIPs."""
     base_url = f"https://api.census.gov/data/{ACS_YEAR}/acs/acs5"
     return (
         _fetch_table(f"{base_url}/profile", PROFILE_VARIABLES, api_key),

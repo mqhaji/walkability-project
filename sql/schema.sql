@@ -1,6 +1,6 @@
--- Stage 1: clean source observations, not the 248-row analytical sample.
--- Run against a dedicated project database. No destructive DROP/TRUNCATE.
--- CREATE IF NOT EXISTS supports repeated setup, not automatic schema migration.
+-- Keep all source rows here; the views select the rows used for analysis.
+-- Use a database reserved for this project. No tables or rows are deleted here.
+-- CREATE IF NOT EXISTS allows repeat setup but does not change existing tables.
 
 CREATE TABLE IF NOT EXISTS dim_geography (
     zcta text PRIMARY KEY CHECK (zcta ~ '^[0-9]{5}$'),
@@ -19,10 +19,9 @@ CREATE TABLE IF NOT EXISTS dim_geography (
     )
 );
 
--- These are statistical estimates, not currency ledger balances. Double
--- precision preserves the notebook's numeric representation without rounding
--- Zillow observations to two decimal places. Explicit finite bounds also reject
--- PostgreSQL's NaN and Infinity numeric values.
+-- These are statistical estimates, not financial-accounting balances. Store
+-- double-precision values without rounding Zillow observations to cents.
+-- The bounds reject NaN and Infinity as well as nonpositive housing values.
 CREATE TABLE IF NOT EXISTS fact_housing (
     zcta text NOT NULL REFERENCES dim_geography (zcta),
     observation_date date NOT NULL CHECK (isfinite(observation_date)),
@@ -30,9 +29,9 @@ CREATE TABLE IF NOT EXISTS fact_housing (
     PRIMARY KEY (zcta, observation_date)
 );
 
--- acs_year identifies the END year of an ACS five-year estimate.
--- Percentages retain the source's 0–100 units. SQL analytical views will convert
--- them to 0–1 shares. NULL means unavailable, never an imputed zero.
+-- acs_year is the end year of the ACS five-year estimate.
+-- Keep source percentages in 0–100 units; the views convert them to 0–1 shares.
+-- NULL means unavailable. Do not replace missing estimates with zero.
 CREATE TABLE IF NOT EXISTS fact_acs (
     zcta text NOT NULL REFERENCES dim_geography (zcta),
     acs_year smallint NOT NULL CHECK (acs_year >= 2009),
@@ -51,5 +50,5 @@ CREATE TABLE IF NOT EXISTS fact_acs (
     PRIMARY KEY (zcta, acs_year)
 );
 
--- Primary keys already supply the indexes needed for the current joins and
--- upserts. Additional indexes are not justified for approximately 250 rows.
+-- Primary-key indexes cover these joins and row inserts/updates.
+-- Additional indexes are not needed for this roughly 250-row study.

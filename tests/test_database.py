@@ -1,7 +1,8 @@
-"""Opt-in PostgreSQL tests. Never use the project's default connection settings.
+"""Run PostgreSQL tests only with an explicitly selected test connection.
 
-TEST_DATABASE_DSN must identify a server where the test role can create databases.
-Each test creates and drops only its own randomly named database.
+Never use the project's default connection. TEST_DATABASE_DSN must point to a
+test server where the role can create databases. Each test creates and drops
+only its own randomly named database.
 """
 
 import os
@@ -22,7 +23,7 @@ from walkability.config import ACS_YEAR, ZHVI_DATE
 
 
 def source_tables():
-    """Four invented Chicago records with ties and known global medians."""
+    """Four invented Chicago rows with equal scores and known sample medians."""
     keys = ["60601", "60602", "60603", "60604"]
     geography = pd.DataFrame(
         [[key, "Chicago", "Chicago", "Cook County", "IL"] for key in keys],

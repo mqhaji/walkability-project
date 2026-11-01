@@ -1,4 +1,4 @@
-"""Run the established statistical analysis without a notebook or source downloads."""
+"""Compare housing and commuting data without a notebook or new downloads."""
 
 import argparse
 from pathlib import Path
@@ -44,13 +44,17 @@ CLUSTER_FEATURES = [
 
 
 class StudySampleError(ValueError):
-    """The analytical sample cannot support this three-city workflow."""
+    """Analysis needs usable observations from each of the three study cities."""
 
 
 def fit_ols(
     frame: pd.DataFrame, predictors: list[str], *, city_indicators: bool = False
 ):
-    """Fit the notebook's full-rank OLS specification with HC3 errors."""
+    """Fit the study's OLS model and reject dependent predictor columns.
+
+    HC3 standard errors allow for unequal residual variance. They do not
+    account for omitted variables or spatial dependence.
+    """
     design = frame[predictors].astype(float).copy()
     if city_indicators:
         indicators = pd.get_dummies(
@@ -59,12 +63,18 @@ def fit_ols(
         design = pd.concat([design, indicators], axis=1)
     design = sm.add_constant(design, has_constant="add")
     if np.linalg.matrix_rank(design.to_numpy()) < design.shape[1]:
-        raise ValueError("OLS design is rank deficient; check the input sample.")
+        raise ValueError(
+            "OLS design is rank deficient: some predictor columns repeat the "
+            "information in others. Check the input sample."
+        )
     return sm.OLS(frame["Log_ZHVI"], design).fit(cov_type="HC3")
 
 
 def lasso_search(groups: np.ndarray) -> GridSearchCV:
-    """Keep scaling inside the city-grouped penalty-selection folds."""
+    """Choose the Lasso penalty using city-based validation splits.
+
+    Fit scaling within each training split, not on the held-out data.
+    """
     return GridSearchCV(
         Pipeline([("scale", StandardScaler()), ("lasso", Lasso(max_iter=100_000))]),
         {"lasso__alpha": np.logspace(-4, 0, 80)},
@@ -75,14 +85,13 @@ def lasso_search(groups: np.ndarray) -> GridSearchCV:
 
 
 def run_analysis(features: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
-    """Fit the fixed study models and return named, exportable tables.
+    """Fit the study models and return result tables without changing the input.
 
-    Input uses database.read_analysis_data's feature contract. Rows are sorted
-    by study area and ZIP before fitting. OLS tables use model/term indexes;
-    assignments and predictions carry explicit study-area/ZIP keys. Other
-    frames contain cluster diagnostics or held-out-city metrics. Series hold
-    summary metrics, bootstrap scores and standardized Lasso coefficients.
-    The caller owns file output; the input frame is not modified.
+    Pass the features returned by database.read_analysis_data. Sort rows by
+    city and ZIP so repeated runs use the same order. OLS tables are indexed
+    by model and term; assignments and predictions include city and ZIP keys.
+    Other results describe cluster quality, resampling stability and prediction
+    errors. This function returns the results; its caller saves the files.
     """
     if (
         features["Study_Area"].isna().any()
@@ -224,11 +233,11 @@ def run_analysis(features: pd.DataFrame) -> dict[str, pd.DataFrame | pd.Series]:
 
 
 class OutputDirectoryNotEmpty(ValueError):
-    """An export would mix new results with existing files."""
+    """The chosen output path already exists and must not be overwritten."""
 
 
 def prepare_output_directory(directory: Path) -> None:
-    """Check the final destination without creating or replacing it."""
+    """Require a new output path and create any missing parent folders."""
     if directory.exists() or directory.is_symlink():
         raise OutputDirectoryNotEmpty(
             "Output destination already exists; choose a new --output-dir."
@@ -237,7 +246,7 @@ def prepare_output_directory(directory: Path) -> None:
 
 
 def export_analysis(features, rankings, audit, results, directory, geometry_file=None):
-    """Write one run into its private staging folder; do not publish it here."""
+    """Write result files into the run's temporary folder, not its final path."""
     for name, frame in {
         **results,
         "city_rankings": rankings,
@@ -272,7 +281,7 @@ def export_analysis(features, rankings, audit, results, directory, geometry_file
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Run the fixed study models and save tables and a prediction chart."
+        description="Run the housing and commuting analysis and save tables and charts."
     )
     parser.add_argument(
         "--output-dir", type=Path, default=PROJECT_ROOT / "outputs" / "analysis"
@@ -280,7 +289,7 @@ def main() -> int:
     parser.add_argument(
         "--maps",
         action="store_true",
-        help="Also save city maps; requires local ZCTA geometry.",
+        help="Also save city maps; requires the local Census ZCTA shapefile.",
     )
     parser.add_argument(
         "--geometry-file",
@@ -289,11 +298,11 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
-        # Fail before fitting or exporting if this would mix separate runs.
+        # Refuse an existing output path before running models or writing files.
         prepare_output_directory(args.output_dir)
         features, rankings, audit = read_analysis_data()
         results = run_analysis(features)
-        # A sibling directory keeps the final rename on the same filesystem.
+        # Write beside the destination so the finished folder can be renamed in place.
         with TemporaryDirectory(
             prefix=f".{args.output_dir.name}-incomplete-", dir=args.output_dir.parent
         ) as temporary:
@@ -316,14 +325,15 @@ def main() -> int:
         return 0
     except OSError:
         print(
-            "Could not save the analysis. Check directory permissions and disk space; this run was not published."
+            "Could not save the analysis. Check folder permissions and disk space; "
+            "no completed results folder was created."
         )
         return 1
     except OutputDirectoryNotEmpty:
         print("Output destination already exists; choose a new --output-dir.")
         return 1
     except (StudySampleError, GeometryInputError) as error:
-        # These application errors contain only fixed, safe guidance.
+        # These messages contain only guidance written by this project, not raw errors.
         print(str(error))
         return 1
     except ValueError:

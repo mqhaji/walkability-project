@@ -1,4 +1,4 @@
-"""Command-line extraction, validation, and loading; no statistical modeling."""
+"""Check and load Zillow and Census data; do not run statistical models."""
 
 import argparse
 from pathlib import Path
@@ -26,15 +26,18 @@ from walkability.prepare import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Prepare and load the fixed walkability study into PostgreSQL."
+        description="Check housing and commuting data and load it into PostgreSQL."
     )
     parser.add_argument(
-        "--zillow-file", type=Path, default=None, help="Manual ZIP-level Zillow CSV."
+        "--zillow-file",
+        type=Path,
+        default=None,
+        help="Downloaded ZIP-level Zillow CSV.",
     )
     parser.add_argument(
         "--acs-file",
         type=Path,
-        help="Explicitly reuse a trusted 2022 ACS CSV in the reference notebook's format; otherwise download via API.",
+        help="Use a trusted saved 2022 ACS extract; otherwise request the data from Census.",
     )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
@@ -45,7 +48,7 @@ def main() -> int:
     mode.add_argument(
         "--views-only",
         action="store_true",
-        help="Install analytical views using existing database tables; no extraction.",
+        help="Set up analysis views from existing tables without reading source files or calling Census.",
     )
     args = parser.parse_args()
     if args.views_only and (args.zillow_file is not None or args.acs_file is not None):
@@ -53,7 +56,7 @@ def main() -> int:
     try:
         if args.views_only:
             apply_views(database_settings())
-            print("PostgreSQL analytical view definitions installed.")
+            print("PostgreSQL analysis views are ready.")
             return 0
         settings = None if args.validate_only else database_settings()
         zillow = prepare_zillow(read_zillow(args.zillow_file or ZILLOW_PATH))
@@ -62,7 +65,7 @@ def main() -> int:
             acs = validate_acs(
                 pd.read_csv(args.acs_file, dtype={"ZIP": "string"}), selected
             )
-            source_label = "explicit local ACS extract (caller confirms 2022 vintage)"
+            source_label = "saved ACS extract (you must confirm it contains 2022 data)"
         else:
             key = env_value("CENSUS_API_KEY")
             if not key:
@@ -77,7 +80,7 @@ def main() -> int:
         print(f"ACS source: {source_label}")
         print("ZCTAs by study area:")
         print(zillow.groupby("Study_Area", sort=True).size().to_string())
-        print(f"Validated one-to-one source coverage: {len(zillow)} ZCTAs")
+        print(f"Each of the {len(zillow)} Zillow ZCTAs has one matching ACS record.")
         missing = acs.isna().sum()
         if missing.gt(0).any():
             print("Unavailable ACS estimates (retained as database NULL):")
@@ -87,12 +90,12 @@ def main() -> int:
             return 0
         counts = load_tables(tables, settings)
         print(
-            "Committed PostgreSQL source rows and analytical views: "
+            "Saved PostgreSQL source rows and analysis views: "
             + ", ".join(f"{name}={count}" for name, count in counts.items())
         )
         if args.acs_file is None:
-            # Keep the same inspectable extract as the reference notebook. This is
-            # a convenience export after commit, not part of the DB transaction.
+            # Save a CSV for inspection after the database commit succeeds.
+            # A failed CSV write does not undo the saved database load.
             try:
                 ACS_PATH.parent.mkdir(parents=True, exist_ok=True)
                 acs.to_csv(ACS_PATH, index=False)

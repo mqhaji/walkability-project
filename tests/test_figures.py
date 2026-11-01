@@ -1,4 +1,4 @@
-"""Figure checks use tiny invented geometries, not downloaded study data."""
+"""Test figures with small invented map shapes, not downloaded study data."""
 
 import unittest
 from pathlib import Path
@@ -36,7 +36,7 @@ class FigureTests(unittest.TestCase):
 
     def test_maps_cover_sample_and_share_scale(self):
         scales = []
-        # Inspect the actual plotting arguments without replacing GeoPandas rendering.
+        # Check the color limits while still letting GeoPandas draw the maps.
         from geopandas.plotting import GeoplotAccessor
 
         actual_call = GeoplotAccessor.__call__

@@ -1,4 +1,4 @@
-"""Invented source records and mocked Census requests; no external data needed."""
+"""Test source handling with invented records and simulated Census responses."""
 
 import io
 import traceback
@@ -67,7 +67,7 @@ def acs_extract(keys=("60601",)):
 
 
 def api_tables():
-    """One valid invented record in each Census response's actual column layout."""
+    """One invented record using the real Census response column names."""
     values = acs_extract().iloc[0].to_dict()
     values.update(Percent_Drove_Alone=50.0, Percent_Carpooled=10.0)
     profile = {

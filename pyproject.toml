@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "walkability-project"
 version = "0.1.0"
-description = "A small Python/PostgreSQL pipeline for cross-city housing and mobility analysis"
+description = "Housing values and commuting patterns across three cities, using Python and PostgreSQL"
 requires-python = ">=3.13"
 dynamic = ["dependencies"]
 

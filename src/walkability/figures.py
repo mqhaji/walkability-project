@@ -1,4 +1,4 @@
-"""Save study figures without opening a notebook or a display window."""
+"""Save study charts and maps without opening a display window."""
 
 from pathlib import Path
 
@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 
 
 class GeometryInputError(ValueError):
-    """Missing, unreadable or incomplete geometry for the requested maps."""
+    """The requested maps have missing, unreadable or incomplete shapes."""
 
 
 def _figure(size: tuple[float, float]) -> Figure:
@@ -28,10 +28,10 @@ def _save(figure: Figure, destination: Path, caption: str) -> None:
 
 
 def save_city_relationships(features: pd.DataFrame, output_dir: Path) -> None:
-    """Compare the same score/log-value observations together and by city.
+    """Plot the same score and log-housing-value rows together and by city.
 
-    Panels share both axis scales. Pearson correlations describe the plotted
-    observations; no regression lines or additional models are fitted.
+    All panels use the same axes. Correlations describe the plotted rows;
+    no regression lines or additional models are fitted.
     """
     colors = {
         "Chicago": "#0072B2",
@@ -85,10 +85,10 @@ def save_diagnostics(
     results: dict[str, pd.DataFrame | pd.Series],
     output_dir: Path,
 ) -> None:
-    """Save five charts from existing features/results without refitting models.
+    """Save five charts from the analysis columns and existing model results.
 
-    The caller supplies an existing output directory. Cluster assignments must
-    match the feature keys exactly; missing rows must not disappear in a plot.
+    The output folder must already exist. Cluster assignments must match all
+    analysis rows so a join cannot silently leave observations out of a plot.
     """
     clustered = features.merge(
         results["cluster_assignments"], on=["Study_Area", "ZIP"], validate="one_to_one"
@@ -185,7 +185,7 @@ def save_diagnostics(
 
 
 def save_maps(features: pd.DataFrame, geometry_path: Path, output_dir: Path) -> int:
-    """Require one geometry per observation and use a shared color range."""
+    """Match one Census shape to each analysis row and use a shared color scale."""
     import geopandas as gpd
 
     try:

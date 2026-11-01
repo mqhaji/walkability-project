@@ -1,4 +1,4 @@
--- 1. City context: correlation uses natural-log ZHVI, as in the notebook.
+-- 1. City summaries. Correlation compares the score with natural-log ZHVI.
 SELECT study_area, count(*) AS zcta_count,
        avg(zhvi) AS mean_zhvi,
        percentile_cont(0.5) WITHIN GROUP (ORDER BY zhvi) AS median_zhvi,
@@ -10,7 +10,7 @@ SELECT study_area, count(*) AS zcta_count,
 FROM public.vw_analysis_features
 GROUP BY study_area ORDER BY study_area;
 
--- 2. The original GLOBAL-sample median screen, enriched by city-relative ranks.
+-- 2. Rows passing the full-sample higher-score/lower-value rule, with city ranks.
 -- Rank 1 is highest score / most expensive housing; percent-ranks are 0–1.
 SELECT study_area, zcta, zillow_city, zhvi, walkability_score,
        walkability_rank, housing_value_rank,
@@ -19,7 +19,7 @@ FROM public.vw_city_rankings
 WHERE is_walkable_and_affordable
 ORDER BY study_area, walkability_score DESC, zcta;
 
--- 3. Supplemental city-mean comparison, NOT the original affordability flag.
+-- 3. Extra city-mean comparison; this is not the fixed full-sample flag.
 SELECT study_area, zcta, zhvi, city_mean_zhvi, zhvi_minus_city_mean,
        walkability_score, city_mean_walkability, walkability_minus_city_mean,
        walkability_percent_rank, housing_value_percent_rank, is_walkable_and_affordable
@@ -27,10 +27,10 @@ FROM public.vw_city_rankings
 WHERE walkability_minus_city_mean > 0 AND zhvi_minus_city_mean < 0
 ORDER BY study_area, walkability_minus_city_mean DESC, zcta;
 
--- 4. Missing records stay visible because period predicates are in JOIN ... ON.
--- Nullable estimates are distinct from absent records. Required percentage and
--- ZHVI fields cannot be NULL under schema.sql; list the nullable required fields.
--- Keep this query aligned with database.SOURCE_AUDIT_QUERY.
+-- 4. Keep missing records visible: put period checks in JOIN ... ON, not WHERE.
+-- Distinguish an absent record from a record with a missing estimate. Percentage
+-- and ZHVI fields cannot be NULL under schema.sql; check the other needed fields.
+-- Keep this query consistent with database.SOURCE_AUDIT_QUERY.
 WITH audited AS (
     SELECT g.zcta, g.study_area,
            h.zcta IS NOT NULL AS housing_present,

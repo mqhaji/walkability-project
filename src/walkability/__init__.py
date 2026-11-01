@@ -1,1 +1,1 @@
-"""Small data pipeline for the walkability portfolio project."""
+"""Data loading and analysis for the three-city housing and commuting study."""

@@ -1,4 +1,4 @@
-"""Load a complete study snapshot into PostgreSQL in one transaction."""
+"""Save a whole study load together and read consistent analysis results."""
 
 from typing import Any
 
@@ -29,7 +29,7 @@ TABLE_COLUMNS = {
 
 
 def _database_value(value: Any) -> Any:
-    """Adapt pandas missing values and NumPy scalars to PostgreSQL parameters."""
+    """Convert missing values to NULL and NumPy values to Python values."""
     if pd.isna(value):
         return None
     return value.item() if isinstance(value, np.generic) else value
@@ -40,7 +40,9 @@ def _validate_batch(tables: dict[str, pd.DataFrame]) -> None:
         raise ValueError("A load must supply all three source tables.")
     for table, frame in tables.items():
         if frame.empty or list(frame.columns) != TABLE_COLUMNS[table]:
-            raise ValueError(f"{table}: empty data or unexpected column layout.")
+            raise ValueError(
+                f"{table}: data is empty or columns do not match the expected order."
+            )
         if (
             frame[TABLE_KEYS[table]].isna().any().any()
             or frame.duplicated(TABLE_KEYS[table]).any()
@@ -57,9 +59,9 @@ def _validate_batch(tables: dict[str, pd.DataFrame]) -> None:
     if any(set(frame["zcta"]) != expected for frame in tables.values()):
         raise ValueError("Every source table must cover exactly the same ZCTAs.")
     if not tables["fact_housing"]["observation_date"].eq(ZHVI_DATE).all():
-        raise ValueError("Housing records must use the pinned observation date.")
+        raise ValueError("Housing records must use the configured study date.")
     if not tables["fact_acs"]["acs_year"].eq(ACS_YEAR).all():
-        raise ValueError("ACS records must use the pinned five-year vintage.")
+        raise ValueError("ACS records must use the configured five-year end year.")
 
 
 def _upsert(connection: psycopg.Connection, table: str, frame: pd.DataFrame) -> None:
@@ -91,11 +93,11 @@ def _upsert(connection: psycopg.Connection, table: str, frame: pd.DataFrame) -> 
 def load_tables(
     tables: dict[str, pd.DataFrame], settings: dict[str, str] | None = None
 ) -> dict[str, int]:
-    """Set up tables, upsert the batch, verify coverage, then commit atomically.
+    """Set up tables and views, insert/update rows, then save the whole load.
 
-    A failure rolls back the entire transaction, including earlier table updates.
-    Unexpected existing keys cause failure rather than silent deletion. This
-    loader targets the project's fixed study sample, not arbitrary data imports.
+    Check stored ZIP coverage before saving. Any failure rolls back the load,
+    including earlier table updates. Unexpected existing keys cause failure,
+    not silent deletion. This loader is for the fixed study, not general imports.
     """
     _validate_batch(tables)
     expected = set(tables["dim_geography"]["zcta"])
@@ -119,7 +121,7 @@ def load_tables(
             rows = connection.execute(query, params).fetchall()
             if len(rows) != len(expected) or {row[0] for row in rows} != expected:
                 raise ValueError(
-                    f"{table}: stored ZCTA coverage differs; no changes committed."
+                    f"{table}: stored ZCTAs do not match this load; no changes were saved."
                 )
             counts[table] = len(rows)
         _apply_views(connection)
@@ -127,19 +129,19 @@ def load_tables(
 
 
 def _apply_views(connection: psycopg.Connection) -> None:
-    """Execute trusted view DDL within the caller's transaction."""
+    """Run the repository's view definitions in the current transaction."""
     connection.execute(VIEWS_PATH.read_text(encoding="utf-8"))
 
 
 def apply_views(settings: dict[str, str] | None = None) -> None:
-    """Install views on existing source tables, without extraction or source writes."""
+    """Set up views on existing tables without fetching or changing source rows."""
     with psycopg.connect(
         **(database_settings() if settings is None else settings)
     ) as connection:
         _apply_views(connection)
 
 
-# Order is the reference notebook's 35-column feature contract.
+# Keep the 35 column names and order expected by the analysis.
 FEATURE_NAMES = {
     "zcta": "ZIP",
     "zillow_city": "City",
@@ -200,8 +202,8 @@ RANKING_COLUMNS = [
     "walkability_bottom_order",
 ]
 
-# Record-presence checks deliberately use fact keys, not nullable estimates.
-# Keep the equivalent standalone query in sql/analysis.sql aligned with this.
+# A missing estimate is not the same as a missing record: check record keys first.
+# Keep the matching example in sql/analysis.sql consistent with this query.
 SOURCE_AUDIT_QUERY = """
 WITH audited AS (
     SELECT g.zcta, g.study_area,
@@ -236,14 +238,14 @@ def _fetch_frame(connection, statement, params=None) -> pd.DataFrame:
     with connection.cursor() as cursor:
         cursor.execute(statement, params)
         if cursor.description is None:
-            raise ValueError("Expected an analytical query result.")
+            raise ValueError("Expected a table of analysis results from the query.")
         return pd.DataFrame.from_records(
             cursor.fetchall(), columns=[column.name for column in cursor.description]
         )
 
 
 def _view_select(view: str, columns: list[str]):
-    """Compose identifiers from fixed internal constants, never user-provided SQL."""
+    """Build a SELECT from fixed view/column names, never user-supplied SQL."""
     return sql.SQL("SELECT {columns} FROM {view} ORDER BY study_area, zcta").format(
         columns=sql.SQL(", ").join(map(sql.Identifier, columns)),
         view=sql.Identifier("public", view),
@@ -274,10 +276,11 @@ def _check_boolean(values: pd.Series, label: str) -> None:
 def read_analysis_data(
     settings: dict[str, str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Return (legacy features, SQL rankings, source audit) from one read snapshot.
+    """Return analysis columns, city rankings and a source-coverage check table.
 
-    No source files, Census key, SQL installation, or writes are needed. The
-    connection closes before returning; subsequent modeling is entirely local.
+    All three reads see the same database snapshot. No source files, Census
+    key, view setup or database writes are needed. Close the connection before
+    returning so model fitting does not hold a database transaction open.
     """
     try:
         with psycopg.connect(
@@ -313,21 +316,29 @@ def read_analysis_data(
             not frame["observation_date"].eq(ZHVI_DATE).all()
             or not frame["acs_year"].eq(ACS_YEAR).all()
         ):
-            raise ValueError("Analytical periods differ from the configured study.")
-        _check_boolean(frame["is_walkable_and_affordable"], "Affordability flag")
+            raise ValueError(
+                "The analysis dates or ACS year do not match the study settings."
+            )
+        _check_boolean(
+            frame["is_walkable_and_affordable"], "Higher-proxy/lower-value flag"
+        )
     for column in ["housing_present", "acs_present", "included_in_analysis"]:
         _check_boolean(audit[column], column)
     if not audit[["housing_present", "acs_present"]].all().all():
         raise ValueError(
-            "Pinned source facts are missing; inspect source coverage before analysis."
+            "Required source facts are missing; check housing and ACS records for the study periods."
         )
     key_columns = ["zcta", "study_area"]
     keys = set(map(tuple, raw[key_columns].to_numpy()))
     if keys != set(map(tuple, rankings[key_columns].to_numpy())):
-        raise ValueError("Ranking and analytical ZCTA sets differ.")
+        raise ValueError(
+            "Rankings and analysis rows must cover the same ZCTAs and cities."
+        )
     included = audit.loc[audit["included_in_analysis"], key_columns]
     if keys != set(map(tuple, included.to_numpy())):
-        raise ValueError("Source audit and analytical membership differ.")
+        raise ValueError(
+            "Source checks and analysis results disagree about which rows are included."
+        )
     for column in [
         "zillow_city",
         "zillow_county",
@@ -337,12 +348,14 @@ def read_analysis_data(
         "is_walkable_and_affordable",
     ]:
         if not raw[column].equals(rankings[column]):
-            raise ValueError(f"Ranking view disagrees with analytical view: {column}")
+            raise ValueError(
+                f"Ranking and analysis views have different values for {column}."
+            )
     numeric_rankings = rankings[RANKING_COLUMNS[10:]].apply(
         pd.to_numeric, errors="raise"
     )
     if not np.isfinite(numeric_rankings.to_numpy(dtype=float)).all():
-        raise ValueError("Ranking metrics must be finite and complete.")
+        raise ValueError("Ranking values cannot be missing or infinite.")
     for column in [
         "walkability_rank",
         "housing_value_rank",
@@ -359,7 +372,7 @@ def read_analysis_data(
     text_columns = ["ZIP", "City", "County", "State", "Study_Area"]
     for column in text_columns:
         if features[column].isna().any():
-            raise ValueError(f"Missing analytical label: {column}")
+            raise ValueError(f"Missing analysis label: {column}")
         features[column] = features[column].astype("string")
     features["ZHVI_Date"] = features["ZHVI_Date"].map(lambda value: value.isoformat())
     features["Is_Walkable_and_Affordable"] = features[
@@ -371,7 +384,7 @@ def read_analysis_data(
         features[numeric_columns].apply(pd.to_numeric, errors="raise").astype("float64")
     )
     if not np.isfinite(features[numeric_columns].to_numpy()).all():
-        raise ValueError("Analytical numeric fields must be complete and finite.")
+        raise ValueError("Numeric analysis values cannot be missing or infinite.")
     return (
         features.reset_index(drop=True),
         rankings.reset_index(drop=True),

@@ -1,5 +1,5 @@
--- Fixed study periods must match config.py. Ordinary views reflect source
--- updates immediately; the caller controls the installation transaction.
+-- Study periods must match config.py. These views read current source rows;
+-- they do not store a separate copy. Python controls the setup transaction.
 CREATE OR REPLACE VIEW public.vw_analysis_features AS
 WITH study_period AS (
     SELECT DATE '2025-03-31' AS observation_date, 2022::smallint AS acs_year
@@ -20,8 +20,8 @@ WITH study_period AS (
     WHERE zhvi > 0 AND zhvi < 'Infinity'::double precision
       AND median_income > 0 AND median_income < 'Infinity'::double precision
       AND median_rent > 0 AND median_rent < 'Infinity'::double precision
-      -- Preserve the reference's complete-case requirement even though home
-      -- value is used only by a sensitivity model. Never impute NULL to zero.
+    -- Keep the shared sample rule: ACS home value must be available even
+    -- though only the sensitivity model uses it. Never replace NULL with zero.
       AND median_home_value > '-Infinity'::double precision
       AND median_home_value < 'Infinity'::double precision
       AND population > 0
@@ -56,7 +56,7 @@ WITH study_period AS (
         + bike_share * 0.1::double precision AS walkability_score
     FROM derived_features d
 ), sample_thresholds AS (
-    -- GLOBAL medians over eligible observations, not within-city medians.
+    -- Use medians across all eligible rows, not separate medians for each city.
     SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY zhvi) AS median_zhvi,
            percentile_cont(0.5) WITHIN GROUP (ORDER BY walkability_score) AS median_walkability
     FROM scored
@@ -78,15 +78,15 @@ CREATE OR REPLACE VIEW public.vw_city_rankings AS
 WITH ranked AS (
     SELECT zcta, study_area, zillow_city, zillow_county, state,
            observation_date, acs_year, zhvi, walkability_score, is_walkable_and_affordable,
-           -- Do not break ties in statistical ranks. Higher percent-rank means
-           -- higher score / more expensive housing, not better affordability.
+           -- Equal values share ranks. A higher percent-rank means a higher
+           -- score or more expensive housing, not better affordability.
            rank() OVER (PARTITION BY study_area ORDER BY walkability_score DESC) AS walkability_rank,
            rank() OVER (PARTITION BY study_area ORDER BY zhvi DESC) AS housing_value_rank,
            percent_rank() OVER (PARTITION BY study_area ORDER BY walkability_score) AS walkability_percent_rank,
            percent_rank() OVER (PARTITION BY study_area ORDER BY zhvi) AS housing_value_percent_rank,
            avg(walkability_score) OVER (PARTITION BY study_area) AS city_mean_walkability,
            avg(zhvi) OVER (PARTITION BY study_area) AS city_mean_zhvi,
-           -- Separate deterministic orders select exactly five when available.
+           -- Break ties by ZCTA when selecting exactly five rows per end.
            row_number() OVER (PARTITION BY study_area ORDER BY walkability_score DESC, zcta) AS walkability_top_order,
            row_number() OVER (PARTITION BY study_area ORDER BY walkability_score, zcta) AS walkability_bottom_order
     FROM public.vw_analysis_features

@@ -1,8 +1,7 @@
-"""Source cleaning and relational table preparation, not statistical features.
+"""Clean source data and arrange it for the three PostgreSQL tables.
 
-The reference notebook's city filters and source definitions are preserved.
-Missing ACS estimates remain missing in the source tables; analytical sample
-selection and derived features belong to the SQL layer.
+Keep the original city filters and source definitions. Missing ACS estimates
+remain missing; SQL chooses the analysis rows and calculates derived columns.
 """
 
 import numpy as np
@@ -74,7 +73,7 @@ def require_columns(frame: pd.DataFrame, columns: list[str], label: str) -> None
 
 
 def normalize_zcta(values: pd.Series) -> pd.Series:
-    """Pad short digit-only keys; reject nulls, decimals, and overlong keys."""
+    """Add leading zeros to short digit keys; reject missing or malformed keys."""
     keys = values.astype("string").str.strip()
     if not keys.str.fullmatch(r"[0-9]{1,5}", na=False).all():
         raise ValueError(
@@ -89,15 +88,17 @@ def require_unique_keys(frame: pd.DataFrame, label: str) -> None:
 
 
 def _numeric(values: pd.Series, label: str) -> pd.Series:
-    """Reject malformed and infinite values while retaining genuine missing data."""
+    """Read numbers, keep missing estimates, and reject invalid values."""
     if values.map(lambda value: isinstance(value, (bool, np.bool_))).any():
-        raise ValueError(f"{label}: Boolean values are not numeric estimates.")
+        raise ValueError(
+            f"{label}: Boolean values (True/False) are not numeric estimates."
+        )
     try:
         result = pd.to_numeric(values, errors="raise")
     except (ValueError, TypeError):
-        raise ValueError(f"{label}: nonnumeric values.") from None
+        raise ValueError(f"{label}: some values cannot be read as numbers.") from None
     if not np.isfinite(result.dropna().astype(float)).all():
-        raise ValueError(f"{label}: infinite values.")
+        raise ValueError(f"{label}: values cannot be infinite.")
     return result
 
 
@@ -163,7 +164,7 @@ def _prepare_acs_table(
         values = _numeric(result.pop(variable), label)
         result[label] = values.mask(
             values.lt(0)
-        )  # Census negative sentinels mean unavailable.
+        )  # Negative Census codes mean the estimate is unavailable.
     return result
 
 
@@ -191,7 +192,7 @@ def prepare_acs(
 
 
 def validate_acs(source: pd.DataFrame, selected_zctas: set[str]) -> pd.DataFrame:
-    """Validate API-prepared data or an explicitly supplied local ACS extract."""
+    """Check ACS rows from the API or a deliberately selected saved CSV."""
     require_columns(source, ACS_COLUMNS, "ACS extract")
     result = source[ACS_COLUMNS].copy()
     result["ZIP"] = normalize_zcta(result["ZIP"])
@@ -221,10 +222,10 @@ def validate_acs(source: pd.DataFrame, selected_zctas: set[str]) -> pd.DataFrame
 
 
 def prepare_tables(zillow: pd.DataFrame, acs: pd.DataFrame) -> dict[str, pd.DataFrame]:
-    """Produce the three source tables, retaining unavailable ACS estimates as NULL."""
+    """Build the three source tables without replacing missing estimates with zero."""
     require_unique_keys(zillow, "Zillow")
     acs = validate_acs(acs, set(zillow["ZIP"]))
-    # This explicit join audit guards against a future many-to-many merge.
+    # Require one matching ACS row per Zillow row, with no extra or duplicate ZIPs.
     coverage = zillow[["ZIP"]].merge(
         acs[["ZIP"]], on="ZIP", validate="one_to_one", how="outer", indicator=True
     )
